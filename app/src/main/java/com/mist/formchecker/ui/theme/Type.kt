@@ -1,6 +1,7 @@
 package com.mist.formchecker.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -20,6 +21,7 @@ import com.mist.formchecker.R
 // 표시되지만 굵기 차이만 없어지는 정도의 경미한 성능 저하이며 크래시는 없음.
 // ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalTextApi::class)
 val AppFontFamily = FontFamily(
     Font(R.font.noto_sans_kr, weight = FontWeight.Normal),
     Font(
