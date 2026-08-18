@@ -1,12 +1,14 @@
 # 폼체커 (FormChecker) — Claude Code 컨텍스트
 
 이 프로젝트는 Cowork 세션에서 설계·기획을 마친 뒤 이어서 구현하는 실시간 스쿼트 카운터 Android 앱입니다.
-**작업을 시작하기 전에 반드시 `01_스쿼트카운터_설계문서.md`를 먼저 읽으세요.** 아키텍처, DB 스키마, 4단계 AI 판정 파이프라인, Phase별 완료기준이 전부 그 문서에 정의되어 있습니다.
+**작업을 시작하기 전에 반드시 `01_스쿼트카운터_설계문서.md`와 `02_디자인시스템.md`를 먼저 읽으세요.** 아키텍처, DB 스키마, 4단계 AI 판정 파이프라인, Phase별 완료기준, 컬러/타이포/스페이싱 토큰이 전부 그 두 문서에 정의되어 있습니다.
 
 ## 현재 상태
 
 - 패키지명: `com.mist.formchecker`
-- Android Studio 기본 Empty Compose Activity 템플릿만 생성된 상태 (Hilt/Room/Supabase/CameraX/LiteRT 등 실제 기능 구현은 아직 전혀 없음)
+- Android Studio 기본 Empty Compose Activity 템플릿 + **디자인 시스템 테마 코드는 이미 반영됨**
+- `app/src/main/java/com/mist/formchecker/ui/theme/`에 `Color.kt`(다크·네온 팔레트), `Type.kt`(타이포 스케일 + rep 카운터 전용 스타일), `Theme.kt`(항상-다크 강제 적용), `Shape.kt`, `Dimens.kt`(8pt 스페이싱/모서리 반경)가 이미 작성돼 있음 — 새 화면/컴포넌트를 만들 때 이 토큰만 사용하고 `Color(0xFF...)` 하드코딩 금지
+- Hilt/Room/Supabase/CameraX/LiteRT 등 실제 기능 구현은 아직 전혀 없음
 - `minSdk 24`, `targetSdk/compileSdk 36`, Compose 활성화됨
 - `app/build.gradle.kts`에 아직 Hilt, Room, WorkManager, CameraX, Supabase, LiteRT 의존성 없음 — Phase 1 착수 시 추가 필요
 
