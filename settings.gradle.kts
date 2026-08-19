@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "FormChecker"
 include(":app")
+include(":pose-engine")
  
