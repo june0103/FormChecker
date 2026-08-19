@@ -3,36 +3,22 @@ package com.mist.formchecker.poseengine
 /**
  * 스쿼트 깊이 단계.
  *
- * 임계값은 설계문서 3.2절 4~5번을 따른다 (STANDING > 160°, BOTTOM < 100°, 깊이 부족 ≥ 120°).
- * 이 값들은 지금 감으로 정한 숫자이며, Phase 3에서 AI-Hub 에어스쿼트 데이터의 실측 분포로
- * 보정할 대상이다 (3.4절 2단계).
+ * 각 단계의 경계값은 이 enum이 아니라 [FormThresholds]가 가지고 있다
+ * ([FormThresholds.depthLevelOf]). 임계값 결정은 데이터·모델 담당 영역이라
+ * 앱 코드에 상수로 박아두지 않는다.
  */
 enum class DepthLevel {
-    /** 서 있음. 무릎 각도 > 160° */
+    /** 서 있음. */
     STANDING,
 
-    /** 내려가는 중이거나 깊이가 부족함. 120° ~ 160° */
+    /** 내려가는 중이거나 깊이가 부족함. */
     SHALLOW,
 
-    /** 목표 깊이 근처. 100° ~ 120° */
+    /** 목표 깊이 근처. */
     PARALLEL,
 
-    /** 충분히 깊게 앉음. < 100° */
+    /** 충분히 깊게 앉음. */
     DEEP,
-    ;
-
-    companion object {
-        fun of(kneeAngle: Float): DepthLevel = when {
-            kneeAngle > STANDING_THRESHOLD -> STANDING
-            kneeAngle >= SHALLOW_THRESHOLD -> SHALLOW
-            kneeAngle >= DEEP_THRESHOLD -> PARALLEL
-            else -> DEEP
-        }
-
-        const val STANDING_THRESHOLD = 160f
-        const val SHALLOW_THRESHOLD = 120f
-        const val DEEP_THRESHOLD = 100f
-    }
 }
 
 /**
@@ -88,27 +74,15 @@ data class SquatForm(
      * 전환 여부는 사용자가 정한다.
      */
     val suggestedAngle: CameraAngle?,
-) {
-    /** 사용자에게 보여줄 경고 목록. 우선순위 순. */
-    val warnings: List<FormWarning>
-        get() = buildList {
-            if (kneeAlignment == KneeAlignment.VALGUS) add(FormWarning.KNEE_VALGUS)
-            if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
-            if (torsoLeanDegrees != null && torsoLeanDegrees > TORSO_LEAN_LIMIT) {
-                add(FormWarning.EXCESSIVE_LEAN)
-            }
-        }
-
-    companion object {
-        /**
-         * 상체가 수직에서 이 각도 이상 기울면 경고한다.
-         *
-         * 스쿼트에서 어느 정도의 전방 숙임은 정상이다(고관절을 접으면 상체가 따라 기운다).
-         * 45°는 "허리에 부담이 갈 정도"의 대략적 기준이며, Phase 3에서 실측 분포로 보정한다.
-         */
-        const val TORSO_LEAN_LIMIT = 45f
-    }
-}
+    /**
+     * 사용자에게 보여줄 경고 목록. 우선순위 순.
+     *
+     * 파생 프로퍼티가 아니라 필드인 이유: 경고 판단에 임계값이 필요한데, 임계값은
+     * [SquatFormAnalyzer]가 설정으로 주입받아 갖고 있다. 이 타입이 임계값을 알게 하면
+     * 데이터 홀더가 판정 책임까지 갖게 된다.
+     */
+    val warnings: List<FormWarning>,
+)
 
 /** 자세 경고. 설계문서 4장 `rep_records.error_flags`에 저장될 항목들이다. */
 enum class FormWarning(val message: String) {

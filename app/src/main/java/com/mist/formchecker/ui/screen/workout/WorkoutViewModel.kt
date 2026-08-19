@@ -8,6 +8,7 @@ import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.MoveNetPoseEngine
 import com.mist.formchecker.poseengine.PoseEngine
+import com.mist.formchecker.poseengine.SquatAnalyzerConfig
 import com.mist.formchecker.poseengine.SquatForm
 import com.mist.formchecker.poseengine.SquatFormAnalyzer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -60,7 +61,15 @@ class WorkoutViewModel @Inject constructor(
     val uiState: StateFlow<WorkoutUiState> = _uiState.asStateFlow()
 
     private var engine: PoseEngine? = null
-    private val formAnalyzer = SquatFormAnalyzer()
+
+    /**
+     * 자세 판정기.
+     *
+     * 지금은 잠정 임계값(`SquatAnalyzerConfig` 기본값)으로 생성한다. 데이터·모델 담당이
+     * AI Hub 실측 분포로 확정한 값을 전달하면 **여기서 설정만 갈아끼우면 되고** 판정
+     * 로직은 건드리지 않는다.
+     */
+    private val formAnalyzer = SquatFormAnalyzer(SquatAnalyzerConfig())
 
     /** 추론 지연 표시용 지수이동평균. 프레임마다 값이 튀면 읽을 수가 없다. */
     private var smoothedInferenceMillis = 0.0

@@ -13,10 +13,16 @@ import kotlin.math.hypot
  *
  * rep 카운팅 상태머신(3.2절 4번)은 아직 없다. 이 분석기는 **한 프레임의 자세**만 보고,
  * 프레임 간 상태 전이는 상위 계층이 담당하게 될 것이다.
+ *
+ * 임계값은 [SquatAnalyzerConfig]로 주입받는다. 기본값은 잠정값이며, 데이터·모델 담당이
+ * AI Hub 실측 분포로 확정한 값을 전달하면 호출부에서 교체한다.
  */
 class SquatFormAnalyzer(
-    private val minConfidence: Float = Pose.MIN_CONFIDENCE,
+    private val config: SquatAnalyzerConfig = SquatAnalyzerConfig(),
 ) {
+    private val form get() = config.form
+    private val detection get() = config.angleDetection
+    private val minConfidence get() = config.minConfidence
 
     fun analyze(
         pose: Pose,
@@ -25,34 +31,52 @@ class SquatFormAnalyzer(
     ): SquatForm {
         val knees = JointAngles.knees(pose, frameAspectRatio, minConfidence)
 
+        // 깊이는 정면에서도 값 자체는 나오지만 원근 왜곡이 있어 신뢰할 수 없다.
+        // 지원 각도가 아니면 계산하지 않는다.
+        val depth = if (cameraAngle.supports(FormCheck.DEPTH)) {
+            knees.representative?.let(form::depthLevelOf)
+        } else {
+            null
+        }
+        val torsoLean = if (cameraAngle.supports(FormCheck.TORSO_LEAN)) {
+            torsoLean(pose, frameAspectRatio)
+        } else {
+            null
+        }
+        val alignment = if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
+            kneeAlignment(pose)
+        } else {
+            null
+        }
+
         return SquatForm(
             cameraAngle = cameraAngle,
             visibility = visibility(pose),
             kneeAngles = knees,
-            // 깊이는 정면에서도 값 자체는 나오지만 원근 왜곡이 있어 신뢰할 수 없다.
-            // 지원 각도가 아니면 계산하지 않는다.
-            depth = if (cameraAngle.supports(FormCheck.DEPTH)) {
-                knees.representative?.let(DepthLevel::of)
-            } else {
-                null
-            },
-            torsoLeanDegrees = if (cameraAngle.supports(FormCheck.TORSO_LEAN)) {
-                torsoLean(pose, frameAspectRatio)
-            } else {
-                null
-            },
-            kneeAlignment = if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
-                kneeAlignment(pose)
-            } else {
-                null
-            },
+            depth = depth,
+            torsoLeanDegrees = torsoLean,
+            kneeAlignment = alignment,
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
                 knees.asymmetry
             } else {
                 null
             },
             suggestedAngle = detectAngle(pose)?.takeIf { it != cameraAngle },
+            warnings = warningsOf(depth, torsoLean, alignment),
         )
+    }
+
+    /** 판정 결과를 사용자 경고로 옮긴다. 우선순위 순. */
+    private fun warningsOf(
+        depth: DepthLevel?,
+        torsoLeanDegrees: Float?,
+        alignment: KneeAlignment?,
+    ): List<FormWarning> = buildList {
+        if (alignment == KneeAlignment.VALGUS) add(FormWarning.KNEE_VALGUS)
+        if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
+        if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
+            add(FormWarning.EXCESSIVE_LEAN)
+        }
     }
 
     /**
@@ -121,9 +145,9 @@ class SquatFormAnalyzer(
         ) ?: return null
 
         // 발을 거의 모으고 선 경우 비율이 불안정해지므로 판정하지 않는다.
-        if (ankleSpread < MIN_STANCE_WIDTH) return null
+        if (ankleSpread < form.minStanceWidth) return null
 
-        return if (kneeSpread / ankleSpread < VALGUS_RATIO) {
+        return if (kneeSpread / ankleSpread < form.valgusRatio) {
             KneeAlignment.VALGUS
         } else {
             KneeAlignment.GOOD
@@ -149,12 +173,12 @@ class SquatFormAnalyzer(
         val hip = midpoint(pose, KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP) ?: return null
 
         val torsoLength = hypot(shoulder.first - hip.first, shoulder.second - hip.second)
-        if (torsoLength < MIN_TORSO_LENGTH) return null
+        if (torsoLength < detection.minTorsoLength) return null
 
         val ratio = shoulderSpread / torsoLength
         return when {
-            ratio >= FRONT_RATIO -> CameraAngle.FRONT
-            ratio <= SIDE_RATIO -> CameraAngle.SIDE
+            ratio >= detection.frontRatio -> CameraAngle.FRONT
+            ratio <= detection.sideRatio -> CameraAngle.SIDE
             // 애매한 구간에서는 추정하지 않는다. 어설픈 안내가 반복되면 사용자가
             // 경고 자체를 무시하게 된다.
             else -> null
@@ -169,22 +193,5 @@ class SquatFormAnalyzer(
     private fun horizontalSpread(pose: Pose, a: KeypointType, b: KeypointType): Float? {
         if (!pose.isReliable(a, minConfidence) || !pose.isReliable(b, minConfidence)) return null
         return abs(pose[a].x - pose[b].x)
-    }
-
-    private companion object {
-        /** 무릎 폭이 발목 폭의 이 비율 미만이면 valgus로 본다. */
-        const val VALGUS_RATIO = 0.8f
-
-        /** 발 간격이 이보다 좁으면 비율이 불안정해 정렬을 판정하지 않는다(정규화 좌표 기준). */
-        const val MIN_STANCE_WIDTH = 0.04f
-
-        /** 몸통이 이보다 짧게 보이면(너무 멀거나 가려짐) 각도 추정을 하지 않는다. */
-        const val MIN_TORSO_LENGTH = 0.05f
-
-        /** 어깨폭/몸통길이 비율이 이 이상이면 정면. */
-        const val FRONT_RATIO = 0.55f
-
-        /** 이 이하면 측면. 사이 구간은 판정 보류. */
-        const val SIDE_RATIO = 0.25f
     }
 }

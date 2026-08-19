@@ -82,10 +82,67 @@ class SquatFormAnalyzerTest {
 
     @Test
     fun `무릎 각도에 따라 깊이 단계가 나뉜다`() {
-        assertEquals(DepthLevel.STANDING, DepthLevel.of(175f))
-        assertEquals(DepthLevel.SHALLOW, DepthLevel.of(140f))
-        assertEquals(DepthLevel.PARALLEL, DepthLevel.of(110f))
-        assertEquals(DepthLevel.DEEP, DepthLevel.of(85f))
+        val t = FormThresholds()
+        assertEquals(DepthLevel.STANDING, t.depthLevelOf(175f))
+        assertEquals(DepthLevel.SHALLOW, t.depthLevelOf(140f))
+        assertEquals(DepthLevel.PARALLEL, t.depthLevelOf(110f))
+        assertEquals(DepthLevel.DEEP, t.depthLevelOf(85f))
+    }
+
+    /**
+     * 임계값을 주입할 수 있어야 한다. 데이터·모델 담당이 확정한 값이 오면 판정 로직
+     * 파일을 수정하지 않고 이 경로로 교체된다.
+     */
+    @Test
+    fun `깊이 경계값을 주입하면 분류가 달라진다`() {
+        // 목표 깊이를 더 깊게 요구하는 설정 (deepAngle을 60°까지 내림)
+        val strict = FormThresholds(standingAngle = 150f, shallowAngle = 90f, deepAngle = 60f)
+
+        // 같은 95°가 기본 설정에서는 "충분히 깊음", 엄격한 설정에서는 "깊이 부족"이 된다.
+        assertEquals(DepthLevel.DEEP, FormThresholds().depthLevelOf(95f))
+        assertEquals(DepthLevel.SHALLOW, strict.depthLevelOf(95f))
+    }
+
+    @Test
+    fun `valgus 비율을 주입하면 판정이 달라진다`() {
+        // 무릎폭 0.10 / 발목폭 0.16 = 0.625
+        val pose = frontFacing(kneeSpread = 0.10f, ankleSpread = 0.16f)
+
+        val lenient = SquatFormAnalyzer(
+            SquatAnalyzerConfig(form = FormThresholds(valgusRatio = 0.5f)),
+        )
+        val strictAnalyzer = SquatFormAnalyzer(
+            SquatAnalyzerConfig(form = FormThresholds(valgusRatio = 0.9f)),
+        )
+
+        assertEquals(
+            KneeAlignment.GOOD,
+            lenient.analyze(pose, 0.75f, CameraAngle.FRONT).kneeAlignment,
+        )
+        assertEquals(
+            KneeAlignment.VALGUS,
+            strictAnalyzer.analyze(pose, 0.75f, CameraAngle.FRONT).kneeAlignment,
+        )
+    }
+
+    @Test
+    fun `상체 기울기 한계를 주입하면 경고 여부가 달라진다`() {
+        val pose = sideFacing(shoulderX = 0.72f)
+
+        val lenient = SquatFormAnalyzer(
+            SquatAnalyzerConfig(form = FormThresholds(torsoLeanLimitDegrees = 80f)),
+        )
+        val strictAnalyzer = SquatFormAnalyzer(
+            SquatAnalyzerConfig(form = FormThresholds(torsoLeanLimitDegrees = 10f)),
+        )
+
+        assertTrue(
+            lenient.analyze(pose, 0.75f, CameraAngle.SIDE).warnings.isEmpty(),
+        )
+        assertTrue(
+            strictAnalyzer.analyze(pose, 0.75f, CameraAngle.SIDE)
+                .warnings.contains(FormWarning.EXCESSIVE_LEAN),
+        )
     }
 
     @Test
