@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 개인 작업 노트 — 기술 선택 근거 기록 (회고 작성용, 커밋하지 않음)
+기술선택_기록.md
