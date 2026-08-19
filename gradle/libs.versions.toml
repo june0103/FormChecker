@@ -15,6 +15,7 @@ room = "2.8.4"
 workManager = "2.11.2"
 cameraX = "1.6.1"
 navigationCompose = "2.9.8"
+kotlinxSerialization = "1.11.0"
 # 2.1.6+ splits out a `litert-api` artifact that declares the same namespace as
 # `litert` itself, which fails AGP's manifest merger. Pinned to the last release
 # before that split until upstream fixes the collision.
@@ -36,8 +37,9 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 
-# Navigation
+# Navigation — 타입 안전 라우트(@Serializable)를 쓰므로 serialization 런타임이 함께 필요
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 
 # Hilt (DI)
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
@@ -67,6 +69,7 @@ litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 
