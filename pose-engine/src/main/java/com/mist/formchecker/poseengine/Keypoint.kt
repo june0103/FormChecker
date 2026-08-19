@@ -1,13 +1,23 @@
 package com.mist.formchecker.poseengine
 
 /**
- * MoveNet이 출력하는 17개 키포인트의 인덱스 (COCO 순서).
+ * 키포인트 인덱스. **Halpe26 순서**를 따른다.
  *
- * 모델 출력은 `[1, 1, 17, 3]` 형태이고 각 키포인트는 `(y, x, confidence)` 순서다.
- * 스쿼트 판정에는 하체 6개(hip/knee/ankle 좌우)만 쓰지만, 카메라 각도 안내나
- * 상체 기울기 판정으로 확장할 여지를 남겨 전체를 정의해둔다.
+ * 0~16번은 COCO17과 동일해서 MoveNet과 그대로 호환된다. 17~25번(Head/Neck/Hip + 발 6개)은
+ * Halpe26 모델만 출력한다.
+ *
+ * ## MoveNet이 못 채우는 인덱스의 처리
+ * MoveNet은 17개만 출력하므로 17~25번을 **confidence 0으로 채운다**. 모든 판정 코드가
+ * [Pose.isReliable]로 게이트하므로, MoveNet 경로에서는 이 키포인트들이 "가려진 관절"과
+ * 똑같이 취급되어 동작이 전혀 바뀌지 않는다. 덕분에 키포인트를 26개로 늘려도 기존
+ * MoveNet 경로를 그대로 유지할 수 있다.
+ *
+ * ## AI Hub 데이터와의 관계
+ * AI Hub 크로스핏 데이터의 CSV 컬럼 순서가 이 26개와 이름·순서까지 정확히 일치한다
+ * (직접 확인). 즉 이 열거형이 데이터셋 포맷과 1:1로 맞는다.
  */
 enum class KeypointType(val index: Int) {
+    // ── COCO17 (MoveNet과 공통) ──────────────────────────────
     NOSE(0),
     LEFT_EYE(1),
     RIGHT_EYE(2),
@@ -25,10 +35,35 @@ enum class KeypointType(val index: Int) {
     RIGHT_KNEE(14),
     LEFT_ANKLE(15),
     RIGHT_ANKLE(16),
+
+    // ── Halpe26 확장 (MoveNet은 출력하지 않음) ────────────────
+    /** 머리 중심. 코·귀와 겹쳐 보이므로 표시·판정에 쓰지 않는다. */
+    HEAD(17),
+
+    /** 목. 어깨 중점과 사실상 같은 위치라 표시하지 않는다. */
+    NECK(18),
+
+    /** 골반 중심. 좌우 힙 중점과 겹치므로 표시하지 않는다. */
+    HIP_CENTER(19),
+
+    LEFT_BIG_TOE(20),
+    RIGHT_BIG_TOE(21),
+    LEFT_SMALL_TOE(22),
+    RIGHT_SMALL_TOE(23),
+
+    /** 뒤꿈치. 발뒤꿈치 들림 판정의 핵심이며 MoveNet에는 없다. */
+    LEFT_HEEL(24),
+    RIGHT_HEEL(25),
     ;
+
+    /** MoveNet(COCO17)이 출력하는 범위인가. */
+    val isCoco17: Boolean get() = index < COCO17_COUNT
 
     companion object {
         val COUNT = entries.size
+
+        /** COCO17 부분집합 크기. MoveNet 출력 길이이기도 하다. */
+        const val COCO17_COUNT = 17
 
         private val byIndex = entries.associateBy(KeypointType::index)
 

@@ -5,7 +5,7 @@ import android.graphics.Matrix
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.mist.formchecker.poseengine.Pose
-import com.mist.formchecker.poseengine.PoseEngine
+import com.mist.formchecker.poseengine.PoseEngineHandle
 
 /**
  * 한 프레임의 추론 결과.
@@ -48,7 +48,7 @@ data class PoseResult(
  * ([SkeletonOverlay]의 `mirrored` 파라미터).
  */
 class PoseAnalyzer(
-    private val engine: PoseEngine,
+    private val engine: PoseEngineHandle,
     private val onResult: (PoseResult) -> Unit,
     private val onFrameDropped: () -> Unit = {},
 ) : ImageAnalysis.Analyzer {
@@ -63,7 +63,9 @@ class PoseAnalyzer(
                 return
             }
 
-            val pose = engine.analyze(upright)
+            // 핸들을 거쳐 호출한다. 엔진이 교체·해제되는 중이면 null이 돌아오고,
+            // 해제는 이 추론이 끝날 때까지 기다린다 (PoseEngineHandle 참고).
+            val pose = engine.use { it.analyze(upright) }
             if (pose == null) {
                 // 설계문서 6장: 실패한 프레임은 드롭 카운트에 반영하고 다음 프레임으로 넘어간다.
                 onFrameDropped()

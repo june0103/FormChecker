@@ -22,33 +22,46 @@ import kotlin.math.roundToInt
  * 좌표에서는 그 패딩을 걷어내([inverse]) 원본 프레임 기준 정규화 좌표로 되돌린다.
  * MoveNet 공식 구현도 `resize_with_pad`로 같은 처리를 한다.
  *
+ * ## 대상이 정사각형일 필요는 없다
+ * MoveNet Lightning은 192x192 정사각형이지만 RTMPose는 192x256(W x H) 직사각형이다.
+ * 그래서 대상 크기를 너비·높이로 따로 받는다. 정사각형 모델은 두 값을 같게 넘기면 되고,
+ * 편의 생성자도 제공한다.
+ *
  * @param sourceWidth 원본 프레임 너비(px)
  * @param sourceHeight 원본 프레임 높이(px)
- * @param targetSize 모델 입력 한 변의 크기(px). Lightning은 192.
+ * @param targetWidth 모델 입력 너비(px)
+ * @param targetHeight 모델 입력 높이(px)
  */
 class LetterboxTransform(
     private val sourceWidth: Int,
     private val sourceHeight: Int,
-    private val targetSize: Int,
+    private val targetWidth: Int,
+    private val targetHeight: Int,
 ) {
+    /** 정사각형 입력 모델용 편의 생성자. */
+    constructor(sourceWidth: Int, sourceHeight: Int, targetSize: Int) :
+        this(sourceWidth, sourceHeight, targetSize, targetSize)
+
     init {
         require(sourceWidth > 0 && sourceHeight > 0) {
             "프레임 크기가 유효하지 않습니다: ${sourceWidth}x$sourceHeight"
         }
-        require(targetSize > 0) { "모델 입력 크기가 유효하지 않습니다: $targetSize" }
+        require(targetWidth > 0 && targetHeight > 0) {
+            "모델 입력 크기가 유효하지 않습니다: ${targetWidth}x$targetHeight"
+        }
     }
 
     /** 원본을 target 안에 온전히 넣기 위한 축소 배율. */
     private val scale: Float =
-        minOf(targetSize.toFloat() / sourceWidth, targetSize.toFloat() / sourceHeight)
+        minOf(targetWidth.toFloat() / sourceWidth, targetHeight.toFloat() / sourceHeight)
 
     /** 축소된 이미지가 실제로 차지하는 영역(px). 나머지는 패딩이다. */
-    val scaledWidth: Int = (sourceWidth * scale).roundToInt().coerceAtMost(targetSize)
-    val scaledHeight: Int = (sourceHeight * scale).roundToInt().coerceAtMost(targetSize)
+    val scaledWidth: Int = (sourceWidth * scale).roundToInt().coerceAtMost(targetWidth)
+    val scaledHeight: Int = (sourceHeight * scale).roundToInt().coerceAtMost(targetHeight)
 
     /** 좌우·상하 패딩(px). 이미지를 가운데 두므로 남는 공간을 절반씩 나눈다. */
-    val padLeft: Int = (targetSize - scaledWidth) / 2
-    val padTop: Int = (targetSize - scaledHeight) / 2
+    val padLeft: Int = (targetWidth - scaledWidth) / 2
+    val padTop: Int = (targetHeight - scaledHeight) / 2
 
     /**
      * 원본 프레임의 정규화 좌표(0~1)를 letterbox된 정사각형 기준 정규화 좌표로 변환.
@@ -57,8 +70,8 @@ class LetterboxTransform(
      * Bitmap 단계에서 수행한다.
      */
     fun forward(x: Float, y: Float): Pair<Float, Float> {
-        val lx = (padLeft + x * scaledWidth) / targetSize
-        val ly = (padTop + y * scaledHeight) / targetSize
+        val lx = (padLeft + x * scaledWidth) / targetWidth
+        val ly = (padTop + y * scaledHeight) / targetHeight
         return lx to ly
     }
 
@@ -69,8 +82,8 @@ class LetterboxTransform(
      * 패딩 영역에 찍힌 좌표는 0~1 밖으로 나갈 수 있으므로 호출부에서 clamp 여부를 정한다.
      */
     fun inverse(x: Float, y: Float): Pair<Float, Float> {
-        val ox = (x * targetSize - padLeft) / scaledWidth
-        val oy = (y * targetSize - padTop) / scaledHeight
+        val ox = (x * targetWidth - padLeft) / scaledWidth
+        val oy = (y * targetHeight - padTop) / scaledHeight
         return ox to oy
     }
 }

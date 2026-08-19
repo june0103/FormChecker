@@ -14,6 +14,9 @@ import android.graphics.Bitmap
  */
 interface PoseEngine : AutoCloseable {
 
+    /** 어떤 모델이 돌고 있는지. 두 모델을 비교할 때 화면·로그에 표시한다. */
+    val modelName: String
+
     /** 모델 로딩에 걸린 시간(ns). 설계문서 8장의 콜드스타트 측정에 쓴다. */
     val modelLoadTimeNanos: Long
 

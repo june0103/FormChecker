@@ -7,7 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.MoveNetPoseEngine
-import com.mist.formchecker.poseengine.PoseEngine
+import com.mist.formchecker.poseengine.PoseEngineHandle
+import com.mist.formchecker.poseengine.RtmPoseEngine
 import com.mist.formchecker.poseengine.SquatAnalyzerConfig
 import com.mist.formchecker.poseengine.SquatForm
 import com.mist.formchecker.poseengine.SquatFormAnalyzer
@@ -27,7 +28,26 @@ import javax.inject.Inject
  * rep 카운팅·세션 저장은 아직 없다. 지금은 "카메라가 켜지고 관절 각도가 실제로 계산되는가"만
  * 확인하는 것이 목표다.
  */
+/**
+ * 포즈 모델 선택.
+ *
+ * [RTMPOSE]가 기본이다. MoveNet 17개(COCO)에는 발 키포인트가 없어 발뒤꿈치 들림과
+ * 무릎-발끝 위치 관계를 관측할 수 없는데, 둘 다 스쿼트 판정의 핵심 항목이기 때문이다.
+ *
+ * [MOVENET]을 남겨둔 이유는 두 가지다.
+ * 1. **성능 비교 근거** — 설계문서 8장의 추론 지연 비교에 쓸 수 있다. GPU delegate 비교가
+ *    불가능해진 상황(`GATHER_ND` 미지원)에서 모델 간 비교가 대안이 된다.
+ * 2. **저사양 기기 폴백 여지** — RTMPose가 30fps 예산에 걸치므로, 느린 기기에서 대안이 필요할
+ *    수 있다.
+ */
+enum class PoseModel(val label: String) {
+    RTMPOSE("RTMPose 26"),
+    MOVENET("MoveNet 17"),
+}
+
 data class WorkoutUiState(
+    val poseModel: PoseModel = PoseModel.RTMPOSE,
+    val modelName: String = "",
     val engineReady: Boolean = false,
     val engineError: String? = null,
     /** 실제로 사용 중인 가속기. GPU를 요청해도 실패하면 CPU로 폴백되므로 요청값과 다를 수 있다. */
@@ -60,7 +80,7 @@ class WorkoutViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(WorkoutUiState())
     val uiState: StateFlow<WorkoutUiState> = _uiState.asStateFlow()
 
-    private var engine: PoseEngine? = null
+    private var engine: PoseEngineHandle? = null
 
     /**
      * 자세 판정기.
@@ -85,21 +105,39 @@ class WorkoutViewModel @Inject constructor(
      * "모델 로딩을 메인스레드 블로킹 → 백그라운드 비동기로 바꾼 전/후 비교"를 측정 항목으로
      * 두고 있어, 비동기 로딩은 처음부터 지켜야 할 기준선이다.
      */
-    private fun loadEngine() {
+    private fun loadEngine(model: PoseModel = _uiState.value.poseModel) {
         viewModelScope.launch {
+            _uiState.update {
+                it.copy(engineReady = false, engineError = null, result = null, form = null)
+            }
+            val previous = engine
+            engine = null
+
             val created = withContext(Dispatchers.IO) {
+                // 진행 중인 추론이 끝난 뒤 해제된다. 그냥 close()하면 분석 스레드가
+                // 쓰고 있는 네이티브 핸들을 해제해 프로세스가 죽는다.
+                previous?.close()
                 runCatching {
-                    MoveNetPoseEngine.create(getApplication<Application>().assets)
+                    val assets = getApplication<Application>().assets
+                    val loaded = when (model) {
+                        PoseModel.MOVENET -> MoveNetPoseEngine.create(assets)
+                        PoseModel.RTMPOSE -> RtmPoseEngine.create(assets)
+                    }
+                    PoseEngineHandle(loaded)
                 }
             }
             created
                 .onSuccess { loaded ->
                     engine = loaded
+                    smoothedInferenceMillis = 0.0
                     _uiState.update {
                         it.copy(
                             engineReady = true,
+                            modelName = loaded.modelName,
                             activeDelegate = loaded.activeDelegate,
                             modelLoadMillis = loaded.modelLoadTimeNanos / 1_000_000,
+                            droppedFrames = 0,
+                            inferenceMillis = 0.0,
                         )
                     }
                 }
@@ -110,6 +148,18 @@ class WorkoutViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    /**
+     * 포즈 모델을 전환한다.
+     *
+     * 엔진을 교체하면 분석기도 새로 만들어져야 하므로 `engineReady`를 내렸다가 올린다.
+     * 화면 쪽에서 `engineReady` 변화를 보고 분석기를 다시 생성한다.
+     */
+    fun selectPoseModel(model: PoseModel) {
+        if (_uiState.value.poseModel == model) return
+        _uiState.update { it.copy(poseModel = model) }
+        loadEngine(model)
     }
 
     /** 엔진이 준비된 뒤에만 분석기를 만들 수 있다. */
