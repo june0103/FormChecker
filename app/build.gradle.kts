@@ -38,6 +38,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    androidResources {
+        // .tflite는 APK 안에서 압축하지 않는다. LiteRT는 assets의 모델을 메모리 매핑해
+        // 읽는데, 압축돼 있으면 매핑이 불가능해 전체를 힙으로 풀어내는 경로를 타게 되고
+        // 그만큼 콜드스타트가 느려진다 (설계문서 8장의 측정 지표에 직접 영향).
+        noCompress += "tflite"
+    }
 }
 
 ksp {
