@@ -4,23 +4,30 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.mist.formchecker.poseengine.JointAngles
-import com.mist.formchecker.poseengine.KneeAngles
 import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngine
 
 /**
- * 한 프레임의 분석 결과.
+ * 한 프레임의 추론 결과.
  *
  * [frameWidth]/[frameHeight]는 **회전을 적용한 뒤**의 크기다. 키포인트의 정규화 좌표가
  * 이 크기를 기준으로 하므로, 오버레이를 그릴 때와 각도를 계산할 때 같은 값을 써야 한다.
+ *
+ * 자세 판정(깊이·무릎 정렬 등)은 여기서 하지 않는다. 판정 결과는 사용자가 고른 촬영
+ * 각도에 따라 달라지는데, 분석기는 카메라에 한 번 붙으면 교체되지 않아 각도 변경을
+ * 반영할 수 없다. 판정은 현재 각도를 아는 상위 계층(ViewModel)이 맡는다.
  */
 data class PoseResult(
     val pose: Pose,
-    val knees: KneeAngles,
     val frameWidth: Int,
     val frameHeight: Int,
-)
+) {
+    /**
+     * 정규화 좌표계는 x축과 y축의 "1"이 서로 다른 픽셀 길이를 뜻하는 비등방 좌표계다.
+     * 각도를 계산할 때 이 비율로 보정하지 않으면 프레임이 세로로 길수록 값이 틀어진다.
+     */
+    val aspectRatio: Float get() = frameWidth.toFloat() / frameHeight
+}
 
 /**
  * CameraX 프레임을 [PoseEngine]에 흘려보내는 분석기.
@@ -66,12 +73,6 @@ class PoseAnalyzer(
             onResult(
                 PoseResult(
                     pose = pose,
-                    knees = JointAngles.knees(
-                        pose = pose,
-                        // 정규화 좌표계는 x축과 y축의 "1"이 서로 다른 픽셀 길이를 뜻하는
-                        // 비등방 좌표계다. 실제 종횡비를 넘겨야 각도가 맞는다.
-                        frameAspectRatio = upright.width.toFloat() / upright.height,
-                    ),
                     frameWidth = upright.width,
                     frameHeight = upright.height,
                 ),
