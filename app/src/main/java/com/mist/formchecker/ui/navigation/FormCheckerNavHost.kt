@@ -12,7 +12,7 @@ import com.mist.formchecker.ui.screen.HomeScreen
 import com.mist.formchecker.ui.screen.SessionSummaryScreen
 import com.mist.formchecker.ui.screen.SettingsScreen
 import com.mist.formchecker.ui.screen.SplashScreen
-import com.mist.formchecker.ui.screen.WorkoutScreen
+import com.mist.formchecker.ui.screen.workout.WorkoutScreen
 
 @Composable
 fun FormCheckerNavHost(
