@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
+import com.mist.formchecker.capture.CaptureScreen
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
@@ -39,9 +40,14 @@ fun FormCheckerNavHost(
         composable<Home> {
             HomeScreen(
                 onStartWorkout = { navController.navigate(Workout) },
+                onOpenCapture = { navController.navigate(Capture) },
                 onOpenHistory = { navController.navigate(History) },
                 onOpenSettings = { navController.navigate(Settings) },
             )
+        }
+
+        composable<Capture> {
+            CaptureScreen(onBack = { navController.popBackStack() })
         }
 
         composable<Workout> {
