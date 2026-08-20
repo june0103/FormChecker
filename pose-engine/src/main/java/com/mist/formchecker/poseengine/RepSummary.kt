@@ -90,6 +90,14 @@ data class RepPosture(
     val torsoLeanDegrees: Float?,
     val kneeAsymmetryDegrees: Float?,
     /**
+     * 무릎폭 ÷ 발목폭. 정면 촬영에서만 의미가 있다.
+     *
+     * [RepSummary.top]과 [RepSummary.bottom]에 모두 담기며, 두 값의 비로 무릎 정렬을
+     * 판정한다([FormThresholds.kneeAlignmentOf]). 절대값 하나로는 판정할 수 없어
+     * 두 시점이 모두 필요하다.
+     */
+    val kneeSpreadRatio: Float?,
+    /**
      * 발 키포인트 원좌표. Halpe26 모델에서만 채워진다.
      *
      * 특징 수식이 확정되지 않았으므로 계산 결과가 아니라 좌표를 담는다.

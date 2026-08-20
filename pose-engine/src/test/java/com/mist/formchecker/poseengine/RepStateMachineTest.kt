@@ -41,6 +41,9 @@ class RepStateMachineTest {
                     hipAngle = angle?.let { it * 0.9f },
                     torsoLeanDegrees = 30f,
                     kneeAsymmetryDegrees = 2f,
+                    // 무릎폭/발목폭. AI Hub 정면 실측(선 자세 0.86 → 최저점 1.43)에
+                    // 맞춰 각도에 반비례하게 만든다. top/bottom에 실려 나가는지 확인용.
+                    kneeSpreadRatio = angle?.let { 0.86f + (170f - it) / 170f * 1.1f },
                     leftFoot = null,
                     rightFoot = null,
                     minLegConfidence = if (angle == null) 0f else 0.9f,
@@ -244,6 +247,26 @@ class RepStateMachineTest {
         )
     }
 
+    /**
+     * 무릎 정렬은 선 자세를 기준선으로 삼는 rep 단위 판정이므로, 두 시점의 무릎폭 비율이
+     * 모두 요약에 실려야 한다. 하나라도 빠지면 판정 자체가 불가능해진다.
+     */
+    @Test
+    fun `무릎폭 비율이 최상점과 최저점에 모두 담긴다`() {
+        val (_, events) = run(squat(bottomAngle = 80f))
+        val summary = events.filterIsInstance<RepEvent.Completed>().single().summary
+
+        val standing = summary.top?.kneeSpreadRatio
+        val bottom = summary.bottom?.kneeSpreadRatio
+        assertNotNull("선 자세 기준선이 없으면 판정할 수 없다", standing)
+        assertNotNull("최저점 값이 없으면 판정할 수 없다", bottom)
+        assertTrue("앉으면 무릎폭 비율이 커진다", bottom!! > standing!!)
+        assertEquals(
+            KneeAlignment.GOOD,
+            FormThresholds().kneeAlignmentOf(standing, bottom),
+        )
+    }
+
     @Test
     fun `가동범위와 구간 길이가 계산된다`() {
         val (_, events) = run(squat(bottomAngle = 80f))
@@ -310,7 +333,7 @@ class RepStateMachineTest {
         squat(bottomAngle = 80f).take(40).forEachIndexed { i, a ->
             val t = i * frameMs
             machine.update(
-                RepFrame(t, a, ema.update(a, t), median.push(a), a, a, a, 30f, 2f, null, null, 0.9f),
+                RepFrame(t, a, ema.update(a, t), median.push(a), a, a, a, 30f, 2f, null, null, null, 0.9f),
             )
         }
 

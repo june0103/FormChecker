@@ -62,9 +62,26 @@ data class SquatForm(
     val cameraAngle: CameraAngle,
     val visibility: PoseVisibility,
     val kneeAngles: KneeAngles,
+    /**
+     * 어깨-힙-무릎 각도. 고관절 굴곡의 척도.
+     *
+     * 촬영 각도로 게이트하지 않는다 — rep 요약에 기록해 데이터 측이 domain gap을 검증할
+     * 재료로 써야 하므로, 판정에 쓰지 않는 각도라도 값 자체는 남긴다.
+     */
+    val hipAngles: BilateralAngles,
     val depth: DepthLevel?,
     val torsoLeanDegrees: Float?,
-    val kneeAlignment: KneeAlignment?,
+    /**
+     * 무릎폭 ÷ 발목폭. **판정이 아니라 측정값이다.**
+     *
+     * 무릎 정렬(valgus)은 이 값의 절대 크기로는 판정할 수 없다 — 정상 스쿼트에서도 선
+     * 자세 0.86에서 최저점 1.43으로 크게 변하기 때문이다. 선 자세를 기준선으로 삼아
+     * rep 단위로 판정하며([FormThresholds.kneeAlignmentOf]), 이 필드는 그 재료다.
+     *
+     * 촬영 각도로 게이트하지 않는다. 측면에서는 무릎·발목이 겹쳐 값이 무의미하지만,
+     * 판정에 쓰지 않고 데이터 측 domain gap 검증용으로 기록만 한다.
+     */
+    val kneeSpreadRatio: Float?,
     val asymmetryDegrees: Float?,
     /**
      * 실제 촬영 각도가 [cameraAngle]과 다르다고 추정될 때 그 각도.
@@ -86,6 +103,13 @@ data class SquatForm(
 
 /** 자세 경고. 설계문서 4장 `rep_records.error_flags`에 저장될 항목들이다. */
 enum class FormWarning(val message: String) {
+    /**
+     * **rep 단위 판정이므로 [SquatForm.warnings]에는 담기지 않는다.**
+     *
+     * 선 자세 기준선이 필요해 프레임 하나로는 판단할 수 없다
+     * ([FormThresholds.kneeAlignmentOf]). rep이 끝난 뒤 `error_flags`에 기록할 때
+     * 이 값을 쓴다.
+     */
     KNEE_VALGUS("무릎을 벌려주세요"),
     SHALLOW_DEPTH("더 깊게 앉아주세요"),
     EXCESSIVE_LEAN("상체를 세워주세요"),
