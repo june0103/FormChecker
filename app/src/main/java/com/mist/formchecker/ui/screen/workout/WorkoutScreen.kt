@@ -5,15 +5,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -95,7 +98,8 @@ private fun WorkoutContent(
 ) {
     // 엔진이 준비된 뒤 한 번만 분석기를 만든다. 매 recomposition마다 새로 만들면
     // CameraX가 분석기를 계속 교체하게 되어 프레임이 끊긴다.
-    val analyzer = remember(state.engineReady) {
+    // poseModel도 키에 넣어, 모델을 바꾸면 새 엔진을 쓰는 분석기로 교체되게 한다.
+    val analyzer = remember(state.engineReady, state.poseModel) {
         if (state.engineReady) viewModel.createAnalyzer() else null
     }
 
@@ -103,35 +107,49 @@ private fun WorkoutContent(
         modifier = modifier
             .fillMaxSize()
             .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
+        // 카메라는 남는 높이를 차지하고, 그 안에서 3:4를 지킨 크기로 줄어든다.
+        // 아래 컨트롤들이 먼저 자리를 잡으므로 화면 밖으로 밀려나지 않는다.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // 분석 프레임과 같은 3:4로 고정한다. 컨테이너 비율이 프레임과 다르면
-                // 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
-                .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(Radius.lg))
-                .background(Color.Black),
+                .weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
-            if (analyzer != null) {
-                CameraPreview(
-                    analyzer = analyzer,
-                    lensFacing = state.lensFacing,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                SkeletonOverlay(
-                    pose = state.result?.pose,
-                    // 추론은 반전 없이 하고 표시할 때만 뒤집는다 (PoseAnalyzer 주석 참고).
-                    mirrored = state.isFrontCamera,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            Box(
+                modifier = Modifier
+                    // 분석 프레임과 같은 3:4를 유지한다. 컨테이너 비율이 프레임과 다르면
+                    // 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
+                    // matchHeightConstraintsFirst: 높이가 제약이므로 높이에서 너비를 도출한다.
+                    .aspectRatio(3f / 4f, matchHeightConstraintsFirst = true)
+                    .clip(RoundedCornerShape(Radius.lg))
+                    .background(Color.Black),
+            ) {
+                if (analyzer != null) {
+                    CameraPreview(
+                        analyzer = analyzer,
+                        lensFacing = state.lensFacing,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    SkeletonOverlay(
+                        pose = state.result?.pose,
+                        // 추론은 반전 없이 하고 표시할 때만 뒤집는다 (PoseAnalyzer 주석 참고).
+                        mirrored = state.isFrontCamera,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }
+
+        PoseModelSelector(
+            selected = state.poseModel,
+            onSelect = viewModel::selectPoseModel,
+        )
 
         CameraAngleSelector(
             selected = state.cameraAngle,
@@ -147,26 +165,76 @@ private fun WorkoutContent(
 
         FormReadout(state = state)
 
+        // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             OutlinedButton(
                 onClick = viewModel::toggleCamera,
-                modifier = Modifier.weight(1f).heightIn(min = TouchTarget.minSize),
+                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+                contentPadding = CompactButtonPadding,
             ) {
-                Text(if (state.isFrontCamera) "후면 카메라" else "전면 카메라")
+                Text(
+                    if (state.isFrontCamera) "후면" else "전면",
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
             OutlinedButton(
                 onClick = onBack,
-                modifier = Modifier.weight(1f).heightIn(min = TouchTarget.minSize),
+                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+                contentPadding = CompactButtonPadding,
             ) {
-                Text("뒤로")
+                Text("뒤로", style = MaterialTheme.typography.labelMedium)
+            }
+            Button(
+                onClick = { onFinish("placeholder-session-id") },
+                modifier = Modifier.weight(2f).height(TouchTarget.minSize),
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("운동 종료", style = MaterialTheme.typography.labelMedium)
             }
         }
+    }
+}
 
-        Button(
-            onClick = { onFinish("placeholder-session-id") },
-            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget.minSize),
-        ) {
-            Text("운동 종료 (결과 화면으로)")
+/**
+ * 포즈 모델 전환.
+ *
+ * RTMPose(Halpe26)가 기본이고 MoveNet은 비교·폴백용으로 남겨둔다. 같은 화면에서 전환해
+ * 스켈레톤 정렬과 추론 시간을 나란히 볼 수 있게 한 것은, 설계문서 8장의 성능 비교 근거를
+ * 개발 중에 계속 확인하기 위함이다 — GPU delegate 비교가 불가능해진 상황에서 모델 간
+ * 비교가 그 대안이 된다.
+ */
+@Composable
+private fun PoseModelSelector(
+    selected: PoseModel,
+    onSelect: (PoseModel) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        PoseModel.entries.forEach { model ->
+            val isSelected = model == selected
+            // 접근성 최소 터치 타겟(48dp)에 정확히 맞춘다. 그 아래로 내리면
+            // 디자인시스템 68행 규칙을 어기게 된다.
+            val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
+            if (isSelected) {
+                Button(
+                    onClick = { onSelect(model) },
+                    modifier = buttonModifier,
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text(model.label, style = MaterialTheme.typography.labelMedium)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { onSelect(model) },
+                    modifier = buttonModifier,
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text(model.label, style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
     }
 }
@@ -213,25 +281,42 @@ private fun AngleOption(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 각도별로 무엇을 판정하는지 함께 보여주되, 두 줄이 48dp 안에 들어가도록
+    // 글자 크기와 내부 여백을 줄인다.
     val content: @Composable () -> Unit = {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelLarge)
-            Text(description, style = MaterialTheme.typography.labelSmall)
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.labelSmall,
+                color = LocalContentColor.current.copy(alpha = 0.8f),
+            )
         }
     }
 
+    val buttonModifier = modifier.height(TouchTarget.minSize)
     if (isSelected) {
         Button(
             onClick = onClick,
-            modifier = modifier.heightIn(min = TouchTarget.minSize),
+            modifier = buttonModifier,
+            contentPadding = CompactButtonPadding,
         ) { content() }
     } else {
         OutlinedButton(
             onClick = onClick,
-            modifier = modifier.heightIn(min = TouchTarget.minSize),
+            modifier = buttonModifier,
+            contentPadding = CompactButtonPadding,
         ) { content() }
     }
 }
+
+/**
+ * 카메라 공간을 최대한 확보하기 위한 축소 여백.
+ *
+ * Material3 기본값은 상하 8dp인데, 두 줄 라벨을 48dp 안에 넣으려면 그만큼이 부족하다.
+ * 버튼 자체 크기(48dp)는 유지하므로 터치 타겟은 규칙을 지킨다.
+ */
+private val CompactButtonPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
 
 /**
  * 고른 각도와 실제로 서 있는 방향이 다를 때의 안내.
@@ -294,7 +379,7 @@ private fun FormReadout(state: WorkoutUiState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.lg))
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(Spacing.md),
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         val angle = knees?.representative
@@ -307,7 +392,7 @@ private fun FormReadout(state: WorkoutUiState, modifier: Modifier = Modifier) {
                     PoseVisibility.FULL -> "각도를 계산할 수 없습니다"
                     else -> "자세를 인식하지 못했습니다"
                 },
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.titleLarge,
             color = if (angle != null) {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -348,7 +433,8 @@ private fun FormReadout(state: WorkoutUiState, modifier: Modifier = Modifier) {
 
         Text(
             text = buildString {
-                append(state.activeDelegate?.name ?: "-")
+                append(state.modelName.ifEmpty { "-" })
+                append(" / ").append(state.activeDelegate?.name ?: "-")
                 append("   추론 ${state.inferenceMillis.format()}ms")
                 append("   로딩 ${state.modelLoadMillis}ms")
                 if (state.droppedFrames > 0) append("   드롭 ${state.droppedFrames}")

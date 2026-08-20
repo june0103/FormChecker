@@ -32,6 +32,8 @@ class MoveNetPoseEngine private constructor(
     override val activeDelegate: Delegate,
 ) : PoseEngine {
 
+    override val modelName: String = "MoveNet Lightning"
+
     /** letterbox 결과를 담을 재사용 버퍼. 프레임마다 새로 만들면 GC 압력이 프레임드랍으로 이어진다. */
     private val inputBitmap: Bitmap =
         Bitmap.createBitmap(INPUT_SIZE, INPUT_SIZE, Bitmap.Config.ARGB_8888)
@@ -108,17 +110,20 @@ class MoveNetPoseEngine private constructor(
      * 모델 좌표는 letterbox된 정사각형 기준이므로 [LetterboxTransform.inverse]로 패딩을
      * 걷어내 **원본 프레임 기준** 정규화 좌표로 되돌린다. 이 변환을 빠뜨리면 스켈레톤이
      * 패딩 폭만큼 치우쳐 그려지고 각도도 함께 틀어진다.
+     *
+     * [KeypointType]은 Halpe26 기준 26개지만 MoveNet은 앞 17개만 출력한다. 나머지
+     * 17~25번(Head/Neck/Hip + 발)은 **confidence 0으로 채운다** — 판정 코드가 모두
+     * [Pose.isReliable]로 게이트하므로 "가려진 관절"과 동일하게 취급되어 무시된다.
      */
     private fun decode(raw: FloatArray, transform: LetterboxTransform): List<Keypoint> =
         List(KeypointType.COUNT) { i ->
+            val type = KeypointType.of(i)
+            if (!type.isCoco17) {
+                return@List Keypoint(type = type, x = 0f, y = 0f, confidence = 0f)
+            }
             val base = i * 3
             val (x, y) = transform.inverse(raw[base + 1], raw[base])
-            Keypoint(
-                type = KeypointType.of(i),
-                x = x,
-                y = y,
-                confidence = raw[base + 2],
-            )
+            Keypoint(type = type, x = x, y = y, confidence = raw[base + 2])
         }
 
     override fun close() {

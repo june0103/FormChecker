@@ -47,6 +47,15 @@ private val BONES = listOf(
     Bone(KeypointType.LEFT_ELBOW, KeypointType.LEFT_WRIST, Side.LEFT),
     Bone(KeypointType.RIGHT_SHOULDER, KeypointType.RIGHT_ELBOW, Side.RIGHT),
     Bone(KeypointType.RIGHT_ELBOW, KeypointType.RIGHT_WRIST, Side.RIGHT),
+
+    // 발 — Halpe26 모델만 출력한다. MoveNet에서는 confidence 0이라 자동으로 그려지지 않는다.
+    // 발뒤꿈치 들림 판정의 근거가 될 부위라 하체와 같은 굵기로 강조한다.
+    Bone(KeypointType.LEFT_ANKLE, KeypointType.LEFT_HEEL, Side.LEFT, primary = true),
+    Bone(KeypointType.LEFT_HEEL, KeypointType.LEFT_BIG_TOE, Side.LEFT, primary = true),
+    Bone(KeypointType.LEFT_BIG_TOE, KeypointType.LEFT_SMALL_TOE, Side.LEFT),
+    Bone(KeypointType.RIGHT_ANKLE, KeypointType.RIGHT_HEEL, Side.RIGHT, primary = true),
+    Bone(KeypointType.RIGHT_HEEL, KeypointType.RIGHT_BIG_TOE, Side.RIGHT, primary = true),
+    Bone(KeypointType.RIGHT_BIG_TOE, KeypointType.RIGHT_SMALL_TOE, Side.RIGHT),
 )
 
 /**
@@ -119,6 +128,8 @@ fun SkeletonOverlay(
 
         pose.keypoints.forEach { keypoint ->
             if (keypoint.confidence < minConfidence) return@forEach
+            // Head/Neck/HipCenter는 코·어깨중점·힙중점과 겹쳐 그려져 화면만 지저분해진다.
+            if (keypoint.type in HIDDEN_POINTS) return@forEach
             val center = keypoint.toOffset()
             val side = keypoint.type.side()
             val radius = if (keypoint.type.isPrimary()) 6.dp.toPx() else 4.dp.toPx()
@@ -137,18 +148,26 @@ fun SkeletonOverlay(
     }
 }
 
+/** 중점 성격이라 다른 점과 겹쳐 그려지는 키포인트. Halpe26에만 존재한다. */
+private val HIDDEN_POINTS = setOf(
+    KeypointType.HEAD, KeypointType.NECK, KeypointType.HIP_CENTER,
+)
+
 private fun KeypointType.side(): Side = when (this) {
     KeypointType.LEFT_SHOULDER, KeypointType.LEFT_ELBOW, KeypointType.LEFT_WRIST,
     KeypointType.LEFT_HIP, KeypointType.LEFT_KNEE, KeypointType.LEFT_ANKLE,
     KeypointType.LEFT_EYE, KeypointType.LEFT_EAR,
+    KeypointType.LEFT_BIG_TOE, KeypointType.LEFT_SMALL_TOE, KeypointType.LEFT_HEEL,
     -> Side.LEFT
 
     KeypointType.RIGHT_SHOULDER, KeypointType.RIGHT_ELBOW, KeypointType.RIGHT_WRIST,
     KeypointType.RIGHT_HIP, KeypointType.RIGHT_KNEE, KeypointType.RIGHT_ANKLE,
     KeypointType.RIGHT_EYE, KeypointType.RIGHT_EAR,
+    KeypointType.RIGHT_BIG_TOE, KeypointType.RIGHT_SMALL_TOE, KeypointType.RIGHT_HEEL,
     -> Side.RIGHT
 
-    KeypointType.NOSE -> Side.CENTER
+    KeypointType.NOSE, KeypointType.HEAD, KeypointType.NECK, KeypointType.HIP_CENTER,
+    -> Side.CENTER
 }
 
 /** 스쿼트 판정에 직접 쓰이는 관절. 점을 크게 그려 눈에 띄게 한다. */
@@ -156,6 +175,7 @@ private fun KeypointType.isPrimary(): Boolean = this in setOf(
     KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP,
     KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE,
     KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE,
+    KeypointType.LEFT_HEEL, KeypointType.RIGHT_HEEL,
 )
 
 private fun Side.color(): Color = when (this) {
