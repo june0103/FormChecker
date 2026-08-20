@@ -10,7 +10,9 @@ import com.mist.formchecker.poseengine.CountingThresholds
 import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FootSample
+import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.KeypointType
+import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.MedianWindow
 import com.mist.formchecker.poseengine.MoveNetPoseEngine
 import com.mist.formchecker.poseengine.Pose
@@ -85,6 +87,13 @@ data class WorkoutUiState(
     val lastRep: RepSummary? = null,
     /** 마지막 rep의 깊이 판정. 카운팅과 분리해 rep 종료 후 별도로 평가한 결과다. */
     val lastRepDepth: DepthLevel? = null,
+    /**
+     * 마지막 rep의 무릎 정렬 판정. 정면 촬영에서만 값이 있다.
+     *
+     * 프레임 단위가 아니라 rep 단위인 이유: 선 자세 무릎폭을 기준선으로 삼아야 하고,
+     * 그 기준선은 rep이 끝나야 확정된다([FormThresholds.kneeAlignmentOf]).
+     */
+    val lastRepAlignment: KneeAlignment? = null,
     /** 마지막으로 중단된 사유. 왜 안 세어졌는지 사용자·개발자가 알 수 있게 한다. */
     val lastAbortReason: RepEvent.Aborted.Reason? = null,
     /** 실측 분석 프레임레이트. 스무딩 창 크기 산출과 성능 확인에 쓴다. */
@@ -262,6 +271,7 @@ class WorkoutViewModel @Inject constructor(
                     // 피하려면 이 두 판단이 섞이지 않아야 한다.
                     lastRepDepth = event.summary.aggregate.minKneeAngle
                         ?.let(config.form::depthLevelOf),
+                    lastRepAlignment = alignmentOf(event.summary),
                     lastAbortReason = null,
                 )
                 is RepEvent.Aborted -> next.copy(lastAbortReason = event.reason)
@@ -293,9 +303,24 @@ class WorkoutViewModel @Inject constructor(
             hipAngle = form.hipAngles.representative,
             torsoLeanDegrees = form.torsoLeanDegrees,
             kneeAsymmetryDegrees = form.kneeAngles.asymmetry,
+            kneeSpreadRatio = form.kneeSpreadRatio,
             leftFoot = FootSample.from(pose, FootSample.Side.LEFT),
             rightFoot = FootSample.from(pose, FootSample.Side.RIGHT),
             minLegConfidence = minLegConfidence(pose),
+        )
+    }
+
+    /**
+     * rep 요약으로 무릎 정렬을 판정한다. 지원하지 않는 촬영 각도에서는 판정하지 않는다.
+     *
+     * 측면에서는 무릎·발목이 앞뒤로 겹쳐 무릎폭 비율이 거의 무작위가 되므로, 값이 있어도
+     * 판정에 쓰면 안 된다.
+     */
+    private fun alignmentOf(summary: RepSummary): KneeAlignment? {
+        if (!summary.cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) return null
+        return config.form.kneeAlignmentOf(
+            standingRatio = summary.top?.kneeSpreadRatio,
+            bottomRatio = summary.bottom?.kneeSpreadRatio,
         )
     }
 
@@ -383,6 +408,7 @@ class WorkoutViewModel @Inject constructor(
                 repState = RepState.IDLE,
                 lastRep = null,
                 lastRepDepth = null,
+                lastRepAlignment = null,
                 lastAbortReason = null,
             )
         }

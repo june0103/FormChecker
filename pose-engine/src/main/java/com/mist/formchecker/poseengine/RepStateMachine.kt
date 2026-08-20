@@ -82,6 +82,8 @@ data class RepFrame(
     val hipAngle: Float?,
     val torsoLeanDegrees: Float?,
     val kneeAsymmetryDegrees: Float?,
+    /** 무릎폭 ÷ 발목폭. 상태 전이에는 쓰지 않고 top/bottom 요약에만 담는다. */
+    val kneeSpreadRatio: Float?,
     val leftFoot: FootSample?,
     val rightFoot: FootSample?,
     val minLegConfidence: Float,
@@ -407,6 +409,7 @@ class RepStateMachine(
         hipAngle = hipAngle,
         torsoLeanDegrees = torsoLeanDegrees,
         kneeAsymmetryDegrees = kneeAsymmetryDegrees,
+        kneeSpreadRatio = kneeSpreadRatio,
         leftFoot = leftFoot,
         rightFoot = rightFoot,
         minLegConfidence = minLegConfidence,

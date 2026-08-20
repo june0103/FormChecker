@@ -43,11 +43,6 @@ class SquatFormAnalyzer(
         } else {
             null
         }
-        val alignment = if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
-            kneeAlignment(pose)
-        } else {
-            null
-        }
 
         return SquatForm(
             cameraAngle = cameraAngle,
@@ -56,24 +51,24 @@ class SquatFormAnalyzer(
             hipAngles = JointAngles.hips(pose, frameAspectRatio, minConfidence),
             depth = depth,
             torsoLeanDegrees = torsoLean,
-            kneeAlignment = alignment,
+            kneeSpreadRatio = kneeSpreadRatio(pose),
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
                 knees.asymmetry
             } else {
                 null
             },
             suggestedAngle = detectAngle(pose)?.takeIf { it != cameraAngle },
-            warnings = warningsOf(depth, torsoLean, alignment),
+            // 무릎 정렬 경고는 여기서 만들지 않는다. rep 단위 판정이라 선 자세
+            // 기준선이 필요하고, 그 기준선은 rep이 시작될 때만 확정된다.
+            warnings = warningsOf(depth, torsoLean),
         )
     }
 
-    /** 판정 결과를 사용자 경고로 옮긴다. 우선순위 순. */
+    /** 프레임 단위로 판정 가능한 항목만 경고로 옮긴다. 우선순위 순. */
     private fun warningsOf(
         depth: DepthLevel?,
         torsoLeanDegrees: Float?,
-        alignment: KneeAlignment?,
     ): List<FormWarning> = buildList {
-        if (alignment == KneeAlignment.VALGUS) add(FormWarning.KNEE_VALGUS)
         if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
         if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
             add(FormWarning.EXCESSIVE_LEAN)
@@ -130,14 +125,19 @@ class SquatFormAnalyzer(
     }
 
     /**
-     * 무릎이 안으로 말렸는지(valgus) 판정한다. 정면 촬영 전용.
+     * 무릎폭 ÷ 발목폭. 판정이 아니라 **측정값**이다.
      *
      * 설계문서 51행은 "무릎 x좌표가 발목보다 안쪽"이라고 기술하지만, 절대 x 비교는 사람이
-     * 화면 어디에 서 있는지와 카메라와의 거리에 따라 기준이 흔들린다. 대신 **무릎 사이 폭과
-     * 발목 사이 폭의 비율**을 쓴다 — 거리·위치와 무관하게 스케일 불변이고, valgus의 정의
-     * ("무릎이 발보다 모인다") 자체를 그대로 표현한다.
+     * 화면 어디에 서 있는지와 카메라와의 거리에 따라 기준이 흔들린다. 그래서 폭의 비율을
+     * 쓴다 — 거리·위치와 무관하게 스케일 불변이다.
+     *
+     * 다만 이 비율의 **절대 크기로는 valgus를 판정할 수 없다.** AI Hub 정면 카메라
+     * 정상 스쿼트 60개를 재보니 선 자세 중앙값 0.857, 최저점 1.432로 rep 안에서
+     * 1.7배 가까이 변한다. 하나의 절대 임계값은 선 자세에서 오탐하고 최저점에서
+     * 놓친다. 판정은 선 자세를 기준선으로 삼아 rep 단위로 한다
+     * ([FormThresholds.kneeAlignmentOf]).
      */
-    private fun kneeAlignment(pose: Pose): KneeAlignment? {
+    private fun kneeSpreadRatio(pose: Pose): Float? {
         val kneeSpread = horizontalSpread(
             pose, KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE,
         ) ?: return null
@@ -145,14 +145,10 @@ class SquatFormAnalyzer(
             pose, KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE,
         ) ?: return null
 
-        // 발을 거의 모으고 선 경우 비율이 불안정해지므로 판정하지 않는다.
+        // 발을 거의 모으고 선 경우 비율이 불안정해지므로 값을 내지 않는다.
         if (ankleSpread < form.minStanceWidth) return null
 
-        return if (kneeSpread / ankleSpread < form.valgusRatio) {
-            KneeAlignment.VALGUS
-        } else {
-            KneeAlignment.GOOD
-        }
+        return kneeSpread / ankleSpread
     }
 
     /**

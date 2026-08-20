@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +35,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.DepthLevel
+import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.PoseVisibility
@@ -53,6 +55,7 @@ import com.mist.formchecker.ui.theme.RepCounterDisplayCompact
 import com.mist.formchecker.ui.theme.RepCounterLabel
 import com.mist.formchecker.ui.theme.Scrim
 import com.mist.formchecker.ui.theme.Spacing
+import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TextPrimary
 import com.mist.formchecker.ui.theme.TouchTarget
 
@@ -147,10 +150,11 @@ private fun WorkoutContent(
                         mirrored = state.isFrontCamera,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    RepCounterHud(
+                    WorkoutHud(
                         state = state,
                         onReset = viewModel::resetRepCount,
-                        modifier = Modifier.align(Alignment.TopCenter),
+                        onSwitchAngle = viewModel::selectCameraAngle,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -169,15 +173,6 @@ private fun WorkoutContent(
             selected = state.cameraAngle,
             onSelect = viewModel::selectCameraAngle,
         )
-
-        state.form?.suggestedAngle?.let { suggested ->
-            AngleMismatchNotice(
-                suggested = suggested,
-                onSwitch = { viewModel.selectCameraAngle(suggested) },
-            )
-        }
-
-        FormReadout(state = state)
 
         // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -210,18 +205,40 @@ private fun WorkoutContent(
 }
 
 /**
- * 카메라 프리뷰 위에 얹는 rep 카운터.
+ * 카메라 프리뷰 위에 얹는 정보 층(HUD) 전체.
  *
- * 설계문서 172행이 "상단에 rep count/목표"를 지정한다. 레이아웃 높이를 차지하지 않아
- * 카메라 영역을 잃지 않는 것도 이유다.
+ * 설계문서 172행이 지정한 배치를 그대로 따른다 — "상단에 rep count/목표, 하단에 피드백
+ * 배너". 판정 정보를 카메라 밖 카드에 두면 그만큼 카메라가 작아지므로 모두 위로 올렸다.
+ *
+ * ## 배치 원칙
+ * 1. **가운데는 비운다** — 스켈레톤이 가려지면 정렬이 맞는지 확인할 수 없다.
+ * 2. **위는 rep 단위, 아래는 프레임 단위** — 시간축이 다른 정보를 위치로 구분한다.
+ *    완주한 rep의 결과와 지금 이 순간의 자세는 성격이 다르다.
+ * 3. **디버그는 최하단 최소 크기** — 나중에 토글로 끄면 사용자용 화면이 된다.
  *
  * ## 스크림이 필요한 이유
- * 카메라 영상 위 텍스트라 배경 밝기를 통제할 수 없다. 밝은 배경에서 흰 숫자는 읽히지
- * 않으므로 상단에 어두운 그라데이션을 깐다. 디자인을 Phase 6으로 미뤘지만 이 대비
- * 처리는 시각 완성도가 아니라 **가독성 기능**이라 지금 넣는다.
+ * 카메라 영상 위 텍스트라 배경 밝기를 통제할 수 없다. 밝은 배경에서는 흰 글자가 전혀
+ * 읽히지 않으므로 위아래에 어두운 그라데이션을 깐다. 디자인을 Phase 6으로 미뤘지만 이
+ * 대비 처리는 시각 완성도가 아니라 **가독성 기능**이라 지금 넣는다.
  */
 @Composable
-private fun RepCounterHud(
+private fun WorkoutHud(
+    state: WorkoutUiState,
+    onReset: () -> Unit,
+    onSwitchAngle: (CameraAngle) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        HudTopBand(state = state, onReset = onReset)
+        // 가운데를 비워 스켈레톤을 가리지 않는다.
+        Spacer(Modifier.weight(1f))
+        HudBottomBand(state = state, onSwitchAngle = onSwitchAngle)
+    }
+}
+
+/** 상단: rep 단위 정보. */
+@Composable
+private fun HudTopBand(
     state: WorkoutUiState,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
@@ -229,11 +246,7 @@ private fun RepCounterHud(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Scrim.copy(alpha = 0.75f), Color.Transparent),
-                ),
-            )
+            .background(Brush.verticalGradient(listOf(Scrim.copy(alpha = 0.75f), Color.Transparent)))
             .padding(horizontal = Spacing.md, vertical = Spacing.sm),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -253,13 +266,15 @@ private fun RepCounterHud(
             )
         }
 
-        // 상태와 중단 사유는 개발 중 동작 확인용이다. rep이 왜 세어지지 않았는지
-        // 눈으로 알 수 있어야 임계값을 조정할 수 있다.
         Text(
             text = buildString {
                 append(state.repState.label())
-                state.lastRepDepth?.let { append("   직전 깊이 ").append(it.label()) }
-                state.lastAbortReason?.let { append("   중단 ").append(it.label()) }
+                state.lastRepDepth?.let { append("  ·  직전 깊이 ").append(it.label()) }
+                // 무릎 정렬은 rep 단위 판정이라 여기(상단 rep 정보)에 온다.
+                // "참고"를 붙이는 이유: AI Hub 데이터에 무릎 모임 라벨이 없어 이 판정은
+                // 실측으로 검증된 바가 없다. 확정 판정처럼 보이면 안 된다.
+                state.lastRepAlignment?.let { append("  ·  무릎 ").append(it.label()).append(" (참고)") }
+                state.lastAbortReason?.let { append("  ·  중단 ").append(it.label()) }
             },
             style = MaterialTheme.typography.labelSmall,
             color = TextPrimary,
@@ -272,9 +287,86 @@ private fun RepCounterHud(
                 color = FeedbackInfo,
                 modifier = Modifier
                     .clickable(onClick = onReset)
-                    .padding(Spacing.xs),
+                    // 접근성 최소 터치 타겟 (디자인시스템 68행).
+                    .heightIn(min = TouchTarget.minSize)
+                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
             )
         }
+    }
+}
+
+/** 하단: 현재 프레임의 자세 정보와 디버그 수치. */
+@Composable
+private fun HudBottomBand(
+    state: WorkoutUiState,
+    onSwitchAngle: (CameraAngle) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val form = state.form
+    val knees = form?.kneeAngles
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Scrim.copy(alpha = 0.8f))))
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        // 우선순위 순으로 쌓는다: 조치가 필요한 안내 → 경고 → 수치 → 디버그.
+        form?.suggestedAngle?.let { suggested ->
+            AngleMismatchNotice(
+                suggested = suggested,
+                onSwitch = { onSwitchAngle(suggested) },
+            )
+        }
+
+        form?.warnings?.forEach { FormWarningRow(it) }
+
+        val angle = knees?.representative
+        Text(
+            text = angle?.let { "무릎 ${it.format()}°   (왼 ${knees.left.formatOrDash()} · 오른 ${knees.right.formatOrDash()})" }
+                // 스켈레톤은 그려지는데 각도가 안 나오는 경우를 구분해 안내한다.
+                // 원인을 알아야 사용자가 카메라를 고칠 수 있다.
+                ?: when (form?.visibility) {
+                    PoseVisibility.UPPER_BODY_ONLY -> "다리가 보이지 않습니다 — 전신이 들어오도록 카메라를 멀리 두세요"
+                    PoseVisibility.FULL -> "각도를 계산할 수 없습니다"
+                    else -> "자세를 인식하지 못했습니다"
+                },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (angle != null) LimeGreen else TextPrimary,
+        )
+
+        // 촬영 각도가 지원하는 판정만 표시한다.
+        val judgements = buildList {
+            form?.depth?.let { add("깊이 ${it.label()}") }
+            form?.torsoLeanDegrees?.let { add("상체 ${it.format()}°") }
+            // 판정이 아니라 측정값이다. 무릎 정렬 판정은 rep 단위이므로 상단에 있다.
+            if (state.cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
+                form?.kneeSpreadRatio?.let { add("무릎폭비 ${it.formatRatio()}") }
+            }
+            form?.asymmetryDegrees?.let { add("좌우차 ${it.format()}°") }
+        }
+        if (judgements.isNotEmpty()) {
+            Text(
+                text = judgements.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextPrimary,
+            )
+        }
+
+        // 개발용 수치. 사용자에게는 의미가 없어 최소 크기로 두고, 나중에 토글로 끈다.
+        Text(
+            text = buildString {
+                append(state.modelName.ifEmpty { "-" })
+                append(" / ").append(state.activeDelegate?.name ?: "-")
+                append("  ").append(state.inferenceMillis.format()).append("ms")
+                if (state.analysisFps > 0) append("  ").append(state.analysisFps.format()).append("fps")
+                append("  로딩 ").append(state.modelLoadMillis).append("ms")
+                if (state.droppedFrames > 0) append("  드롭 ").append(state.droppedFrames)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+        )
     }
 }
 
@@ -457,92 +549,6 @@ private fun AngleMismatchNotice(
     }
 }
 
-/**
- * 판정 결과와 성능 수치.
- *
- * 표시 항목이 촬영 각도에 따라 달라진다 — 지원하지 않는 항목은 아예 보여주지 않는다.
- * 틀릴 수 있는 값을 회색으로라도 띄우면 사용자가 그걸 읽고 판단하게 되기 때문이다.
- *
- * 성능 수치를 지금부터 노출하는 이유: 설계문서 8장의 지표(추론 지연·프레임드랍·delegate)를
- * 개발 중에 계속 눈으로 확인할 수 있어야, 나중에 개선 전/후 비교를 만들 때 어디를 손봐야
- * 하는지 알 수 있다. 이 값들은 SessionSummary로 옮겨갈 자리다(설계문서 173행).
- */
-@Composable
-private fun FormReadout(state: WorkoutUiState, modifier: Modifier = Modifier) {
-    val form: SquatForm? = state.form
-    val knees = form?.kneeAngles
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.lg))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-    ) {
-        val angle = knees?.representative
-        Text(
-            text = angle?.let { "무릎 각도  ${it.format()}°" }
-                // 스켈레톤은 그려지는데 각도가 안 나오는 경우를 구분해 안내한다.
-                // 원인을 알아야 사용자가 카메라를 고칠 수 있다.
-                ?: when (form?.visibility) {
-                    PoseVisibility.UPPER_BODY_ONLY -> "다리가 보이지 않습니다"
-                    PoseVisibility.FULL -> "각도를 계산할 수 없습니다"
-                    else -> "자세를 인식하지 못했습니다"
-                },
-            style = MaterialTheme.typography.titleLarge,
-            color = if (angle != null) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-        if (angle == null && form?.visibility == PoseVisibility.UPPER_BODY_ONLY) {
-            Text(
-                text = "전신이 화면에 들어오도록 카메라를 멀리 두거나 각도를 낮춰주세요.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Text(
-            text = "왼쪽 ${knees?.left.formatOrDash()}   오른쪽 ${knees?.right.formatOrDash()}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        // 각도별로 지원하는 항목만 표시한다.
-        val judgements = buildList {
-            form?.depth?.let { add("깊이 ${it.label()}") }
-            form?.torsoLeanDegrees?.let { add("상체 ${it.format()}°") }
-            form?.kneeAlignment?.let { add("무릎 ${it.label()}") }
-            form?.asymmetryDegrees?.let { add("좌우차 ${it.format()}°") }
-        }
-        if (judgements.isNotEmpty()) {
-            Text(
-                text = judgements.joinToString("   "),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-
-        form?.warnings?.forEach { warning ->
-            FormWarningRow(warning)
-        }
-
-        Text(
-            text = buildString {
-                append(state.modelName.ifEmpty { "-" })
-                append(" / ").append(state.activeDelegate?.name ?: "-")
-                append("   추론 ${state.inferenceMillis.format()}ms")
-                append("   로딩 ${state.modelLoadMillis}ms")
-                if (state.droppedFrames > 0) append("   드롭 ${state.droppedFrames}")
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 @Composable
 private fun FormWarningRow(warning: FormWarning, modifier: Modifier = Modifier) {
     Row(
@@ -563,6 +569,8 @@ private fun FormWarningRow(warning: FormWarning, modifier: Modifier = Modifier) 
         )
     }
 }
+
+private fun Float.formatRatio(): String = "%.2f".format(this)
 
 private fun DepthLevel.label(): String = when (this) {
     DepthLevel.STANDING -> "서 있음"

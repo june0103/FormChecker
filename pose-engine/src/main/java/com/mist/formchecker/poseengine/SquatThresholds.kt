@@ -46,12 +46,32 @@ data class FormThresholds(
     val deepAngle: Float = 100f,
 
     /**
-     * 무릎 폭 ÷ 발목 폭이 이 비율 미만이면 valgus로 본다.
+     * 최저점의 무릎폭/발목폭이 **선 자세 기준선의 이 배수 미만**이면 valgus로 본다.
      *
-     * 절대 좌표 비교(설계문서 51행)가 아니라 비율을 쓰는 이유는 스케일 불변성이다 —
-     * 사람이 화면 어디에 서 있든, 카메라와 얼마나 떨어져 있든 같은 판정이 나온다.
+     * ## 절대 비율을 쓰지 않는 이유 (실측으로 확인)
+     * 처음에는 "무릎폭/발목폭 < 0.8"이라는 절대 임계값을 썼는데, AI Hub 정면 카메라의
+     * 정상 스쿼트 60개를 측정해보니 잘못된 방식이었다.
+     *
+     * | 시점 | 무릎폭/발목폭 (2D 정면) | 3D 실제 |
+     * |---|---|---|
+     * | 선 자세 | 0.857 (p10 0.760) | 0.703 |
+     * | 최저점 | 1.432 | 1.174 |
+     *
+     * 두 가지가 동시에 틀렸다.
+     * 1. **선 자세에서 정상인의 20%가 0.8 미만**이다. 발을 어깨너비로 벌리고 서면 무릎은
+     *    힙과 발목 사이에 놓이므로 무릎폭이 발목폭보다 좁은 것이 정상이다. 발을 넓게
+     *    벌릴수록 비율이 더 낮아진다 → 정상 자세에 오탐.
+     * 2. **최저점에서는 정상이 1.43까지 올라간다.** 3D로 확인하니 무릎 간격이 265mm →
+     *    476mm로 실제 80% 벌어지며(원근 확대가 아니다 — 2D 82%와 거의 일치), 0.8 임계값은
+     *    절대 발화하지 않는다 → 진짜 valgus를 미탐.
+     *
+     * 기준선이 동작 구간에 따라 0.86 → 1.43으로 바뀌므로 **단일 절대 임계값으로는 불가능**하다.
+     * 선 자세 대비 배수로 보면 발 넓이·체형이 기준선에 흡수되어 자동 보정된다.
+     *
+     * 정상은 최저점에서 기준선의 약 1.67배(0.857 → 1.432)가 된다. 잠정값 1.1은 "거의
+     * 벌어지지 않았다"를 잡는 수준이며 실측 분포로 보정해야 한다.
      */
-    val valgusRatio: Float = 0.8f,
+    val valgusSpreadGain: Float = 1.1f,
 
     /**
      * 상체가 수직에서 이 각도 이상 기울면 경고한다.
@@ -76,6 +96,27 @@ data class FormThresholds(
         else -> DepthLevel.DEEP
     }
 
+    /**
+     * 무릎 정렬을 **rep 단위**로 판정한다. 정면 촬영 전용.
+     *
+     * 프레임 단위로 판정할 수 없는 이유: 기준선이 필요하고, 그 기준선은 그 rep의 선 자세
+     * 시점에만 확정된다. [valgusSpreadGain] 주석의 실측 근거를 함께 볼 것.
+     *
+     * @param standingRatio 선 자세의 무릎폭/발목폭
+     * @param bottomRatio 최저점의 무릎폭/발목폭
+     * @return 둘 중 하나라도 없으면 null (판정 불가). 기준선이 0에 가까우면 비율이
+     *   불안정해지므로 판정하지 않는다.
+     */
+    fun kneeAlignmentOf(standingRatio: Float?, bottomRatio: Float?): KneeAlignment? {
+        if (standingRatio == null || bottomRatio == null) return null
+        if (standingRatio < MIN_BASELINE_RATIO) return null
+        return if (bottomRatio / standingRatio < valgusSpreadGain) {
+            KneeAlignment.VALGUS
+        } else {
+            KneeAlignment.GOOD
+        }
+    }
+
     companion object {
         /**
          * 각 값의 출처. 데이터 측 확정값이 오면 여기가 [ThresholdOrigin.DATA_DERIVED]로 바뀐다.
@@ -87,10 +128,13 @@ data class FormThresholds(
             "standingAngle" to ThresholdOrigin.DESIGN_DOC,
             "shallowAngle" to ThresholdOrigin.DESIGN_DOC,
             "deepAngle" to ThresholdOrigin.DESIGN_DOC,
-            "valgusRatio" to ThresholdOrigin.PROVISIONAL,
+            "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             "torsoLeanLimitDegrees" to ThresholdOrigin.PROVISIONAL,
             "minStanceWidth" to ThresholdOrigin.PROVISIONAL,
         )
+
+        /** 기준선이 이보다 작으면 비율이 불안정해 판정하지 않는다. */
+        private const val MIN_BASELINE_RATIO = 0.2f
     }
 }
 

@@ -1,5 +1,6 @@
 package com.mist.formchecker.poseengine
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -64,7 +65,6 @@ class SquatFormAnalyzerTest {
 
         assertNotNull("깊이는 측면에서 판정한다", form.depth)
         assertNotNull("상체 기울기는 측면에서 판정한다", form.torsoLeanDegrees)
-        assertNull("무릎 정렬은 측면에서 판정하지 않는다", form.kneeAlignment)
         assertNull("좌우 비대칭은 측면에서 판정하지 않는다", form.asymmetryDegrees)
     }
 
@@ -72,7 +72,6 @@ class SquatFormAnalyzerTest {
     fun `정면에서는 무릎 정렬과 비대칭만 판정한다`() {
         val form = analyzer.analyze(frontFacing(), 0.75f, CameraAngle.FRONT)
 
-        assertNotNull("무릎 정렬은 정면에서 판정한다", form.kneeAlignment)
         assertNotNull("좌우 비대칭은 정면에서 판정한다", form.asymmetryDegrees)
         assertNull("깊이는 정면에서 판정하지 않는다", form.depth)
         assertNull("상체 기울기는 정면에서 판정하지 않는다", form.torsoLeanDegrees)
@@ -104,25 +103,13 @@ class SquatFormAnalyzerTest {
     }
 
     @Test
-    fun `valgus 비율을 주입하면 판정이 달라진다`() {
-        // 무릎폭 0.10 / 발목폭 0.16 = 0.625
-        val pose = frontFacing(kneeSpread = 0.10f, ankleSpread = 0.16f)
+    fun `valgus 배수를 주입하면 판정이 달라진다`() {
+        // 선 자세 0.86 → 최저점 1.20. 기준선 대비 1.40배 벌어졌다.
+        val lenient = FormThresholds(valgusSpreadGain = 1.2f)
+        val strict = FormThresholds(valgusSpreadGain = 1.6f)
 
-        val lenient = SquatFormAnalyzer(
-            SquatAnalyzerConfig(form = FormThresholds(valgusRatio = 0.5f)),
-        )
-        val strictAnalyzer = SquatFormAnalyzer(
-            SquatAnalyzerConfig(form = FormThresholds(valgusRatio = 0.9f)),
-        )
-
-        assertEquals(
-            KneeAlignment.GOOD,
-            lenient.analyze(pose, 0.75f, CameraAngle.FRONT).kneeAlignment,
-        )
-        assertEquals(
-            KneeAlignment.VALGUS,
-            strictAnalyzer.analyze(pose, 0.75f, CameraAngle.FRONT).kneeAlignment,
-        )
+        assertEquals(KneeAlignment.GOOD, lenient.kneeAlignmentOf(0.86f, 1.20f))
+        assertEquals(KneeAlignment.VALGUS, strict.kneeAlignmentOf(0.86f, 1.20f))
     }
 
     @Test
@@ -159,31 +146,22 @@ class SquatFormAnalyzerTest {
     // ── 무릎 정렬 ─────────────────────────────────────────────
 
     @Test
-    fun `무릎 폭이 발목 폭과 비슷하면 정상이다`() {
+    fun `무릎폭 비율은 판정이 아니라 측정값으로 나온다`() {
         val form = analyzer.analyze(
-            frontFacing(kneeSpread = 0.16f, ankleSpread = 0.16f), 0.75f, CameraAngle.FRONT,
+            frontFacing(kneeSpread = 0.08f, ankleSpread = 0.16f), 0.75f, CameraAngle.FRONT,
         )
 
-        assertEquals(KneeAlignment.GOOD, form.kneeAlignment)
+        assertEquals(0.5f, form.kneeSpreadRatio!!, 0.001f)
+        // 프레임 하나로는 valgus를 판정할 수 없으므로 경고가 나오지 않아야 한다.
         assertTrue(form.warnings.isEmpty())
     }
 
-    @Test
-    fun `무릎이 발목보다 크게 모이면 valgus로 판정한다`() {
-        val form = analyzer.analyze(
-            frontFacing(kneeSpread = 0.06f, ankleSpread = 0.18f), 0.75f, CameraAngle.FRONT,
-        )
-
-        assertEquals(KneeAlignment.VALGUS, form.kneeAlignment)
-        assertTrue(form.warnings.contains(FormWarning.KNEE_VALGUS))
-    }
-
     /**
-     * 절대 좌표가 아니라 비율로 판정하므로, 사람이 화면 어디에 서 있든 결과가 같아야 한다.
+     * 절대 좌표가 아니라 비율이므로, 사람이 화면 어디에 서 있든 값이 같아야 한다.
      * 이게 깨지면 카메라와의 거리에 따라 판정이 흔들린다.
      */
     @Test
-    fun `무릎 정렬 판정은 화면상 위치에 영향받지 않는다`() {
+    fun `무릎폭 비율은 화면상 위치에 영향받지 않는다`() {
         val centered = analyzer.analyze(
             frontFacing(kneeSpread = 0.06f, ankleSpread = 0.18f), 0.75f, CameraAngle.FRONT,
         )
@@ -201,16 +179,47 @@ class SquatFormAnalyzerTest {
             0.75f, CameraAngle.FRONT,
         )
 
-        assertEquals(centered.kneeAlignment, shifted.kneeAlignment)
+        assertEquals(centered.kneeSpreadRatio!!, shifted.kneeSpreadRatio!!, 0.001f)
     }
 
     @Test
-    fun `발을 모으고 서면 무릎 정렬을 판정하지 않는다`() {
+    fun `발을 모으고 서면 무릎폭 비율을 내지 않는다`() {
         val form = analyzer.analyze(
             frontFacing(kneeSpread = 0.01f, ankleSpread = 0.02f), 0.75f, CameraAngle.FRONT,
         )
 
-        assertNull("기준이 불안정한 구간에서는 판정을 보류한다", form.kneeAlignment)
+        assertNull("기준이 불안정한 구간에서는 값을 내지 않는다", form.kneeSpreadRatio)
+    }
+
+    /**
+     * AI Hub 정면 카메라 정상 스쿼트의 실측 중앙값(선 자세 0.857 → 최저점 1.432)이
+     * valgus로 판정되면 안 된다. 이전 절대 임계값(0.8)은 선 자세 자체를 오탐했다.
+     */
+    @Test
+    fun `정상 스쿼트의 실측 비율은 valgus가 아니다`() {
+        assertEquals(
+            KneeAlignment.GOOD,
+            FormThresholds().kneeAlignmentOf(standingRatio = 0.857f, bottomRatio = 1.432f),
+        )
+    }
+
+    @Test
+    fun `최저점에서 무릎이 벌어지지 않으면 valgus로 판정한다`() {
+        // 선 자세와 거의 같은 폭을 유지한 채 앉았다 = 무릎이 따라 벌어지지 않았다.
+        assertEquals(
+            KneeAlignment.VALGUS,
+            FormThresholds().kneeAlignmentOf(standingRatio = 0.86f, bottomRatio = 0.90f),
+        )
+    }
+
+    @Test
+    fun `기준선이나 최저점 값이 없으면 무릎 정렬을 판정하지 않는다`() {
+        val thresholds = FormThresholds()
+
+        assertNull(thresholds.kneeAlignmentOf(standingRatio = null, bottomRatio = 1.4f))
+        assertNull(thresholds.kneeAlignmentOf(standingRatio = 0.86f, bottomRatio = null))
+        // 기준선이 0에 가까우면 배수가 폭발하므로 판정하지 않는다.
+        assertNull(thresholds.kneeAlignmentOf(standingRatio = 0.05f, bottomRatio = 1.4f))
     }
 
     // ── 상체 기울기 ───────────────────────────────────────────
@@ -316,15 +325,19 @@ class SquatFormAnalyzerTest {
         assertTrue(form.warnings.isEmpty())
     }
 
+    /**
+     * 무릎폭 비율은 촬영 각도로 게이트하지 않는다 — 측면에서는 판정에 쓸 수 없지만,
+     * 데이터 측이 domain gap을 검증할 재료로 기록은 남겨야 한다. 판정 쪽에서 걸러진다.
+     */
     @Test
-    fun `지원하지 않는 각도의 항목은 계산 자체를 하지 않는다`() {
-        // 정면 모드에서 valgus인 자세를 줘도, 측면 모드로 보면 무릎 정렬은 null이다.
-        val valgusPose = frontFacing(kneeSpread = 0.06f, ankleSpread = 0.18f)
+    fun `무릎폭 비율은 촬영 각도와 무관하게 기록된다`() {
+        val pose = frontFacing(kneeSpread = 0.06f, ankleSpread = 0.18f)
 
-        assertNull(analyzer.analyze(valgusPose, 0.75f, CameraAngle.SIDE).kneeAlignment)
-        assertEquals(
-            KneeAlignment.VALGUS,
-            analyzer.analyze(valgusPose, 0.75f, CameraAngle.FRONT).kneeAlignment,
+        assertNotNull(analyzer.analyze(pose, 0.75f, CameraAngle.SIDE).kneeSpreadRatio)
+        assertNotNull(analyzer.analyze(pose, 0.75f, CameraAngle.FRONT).kneeSpreadRatio)
+        assertFalse(
+            "측면은 무릎 정렬을 지원하지 않는다",
+            CameraAngle.SIDE.supports(FormCheck.KNEE_ALIGNMENT),
         )
     }
 }
