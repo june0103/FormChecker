@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  수집 데이터 공유용 경로.
+
+  앱 전용 외부 저장소(Android/data/<패키지>/files)의 captures 폴더만 노출한다.
+  루트를 열어주면 나중에 추가되는 파일까지 전부 공유 대상이 되므로 폴더를 좁혀둔다.
+-->
+<paths>
+    <external-files-path
+        name="captures"
+        path="captures/" />
+</paths>

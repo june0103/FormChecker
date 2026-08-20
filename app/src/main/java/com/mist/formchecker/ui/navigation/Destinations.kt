@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 //   Splash
 //     └─ Home
 //          ├─ Workout ─→ SessionSummary(sessionId)
+//          ├─ Capture  (기준 자세 수집 모드)
 //          ├─ History
 //          └─ Settings
 //
@@ -33,6 +34,16 @@ data object Workout
  */
 @Serializable
 data class SessionSummary(val sessionId: String)
+
+/**
+ * 기준 자세 데이터 수집 모드 (설계문서 확장 · 데이터 명세서 §4).
+ *
+ * 운동 화면과 분리한 이유: 라벨링이 촬영 **후**에 와야 하고(촬영 전 선언으로는 실제로
+ * 정상이었는지 알 수 없다), 캘리브레이션이 절차를 강제해야 하며, 운동 화면은 제품이므로
+ * 수집용 컨트롤이 남아 있으면 안 된다.
+ */
+@Serializable
+data object Capture
 
 @Serializable
 data object History
