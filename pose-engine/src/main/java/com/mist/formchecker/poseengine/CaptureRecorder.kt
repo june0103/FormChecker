@@ -51,18 +51,30 @@ class CaptureRecorder(
     private var currentRepId = 0
     /** 현재 rep의 프레임 인덱스 범위. rep 밖이면 null. */
     private var repStartIndex: Int? = null
+    /**
+     * 아직 내보내지 않은 첫 프레임의 인덱스.
+     *
+     * rep 경계와 **별개로** 관리한다. rep 창은 "어디부터가 이 rep인가"이고 이 값은
+     * "어디까지 파일에 나갔나"다. 둘을 하나로 쓰면 rep 밖 프레임이 영원히 안 나간다.
+     */
+    private var exportedUpTo = 0
     private var standingFlexion: Float? = null
 
     val recordedFrames: Int get() = frames.size
     val recordedReps: Int get() = completedReps.size
 
     /**
-     * rep 하나가 끝났을 때의 결과. 요약과 그 rep의 프레임을 함께 낸다.
+     * rep 하나가 끝났을 때의 결과.
      *
      * ## 왜 프레임을 rep 단위로 내보내는가
      * 진행도는 **rep이 끝나야 계산된다** — 하강 중에는 최저점을 모른다. 프레임을 즉시
      * 기록하면 진행도가 항상 비어 나가고, 그건 임계값 생성에 필요한 핵심 컬럼이다.
      * (초기 구현이 실제로 그렇게 새어 실기에서 2243행 전부 빈 칸으로 나왔다.)
+     *
+     * @property frames 이 배치로 나가는 프레임 전체. **rep 프레임만이 아니다** — 직전
+     *   배치 이후 쌓인 rep 밖 프레임(선 자세 대기 등)까지 함께 실린다. rep 밖 프레임을
+     *   버리면 하강 시작 앞뒤가 파일에서 사라지고, 그건 재계산으로 복구할 수 없다.
+     *   이 배치 방식이 순서를 지켜 주므로 즉시 기록으로 돌아갈 필요가 없다.
      */
     data class CompletedRep(val rep: CaptureRep, val frames: List<CaptureFrame>)
 
@@ -127,7 +139,7 @@ class CaptureRecorder(
 
         if (event is RepEvent.Started) {
             currentRepId++
-            repStartIndex = frames.size
+            repStartIndex = claimDescentStart(features.representativeKneeFlexion, timestampMs)
         }
 
         frames += MutableFrame(
@@ -258,7 +270,71 @@ class CaptureRecorder(
         completedReps += rep
         // 진행도를 덮어쓴 뒤에 불변 스냅샷을 만든다. 이 시점 이전에 내보내면 진행도가
         // 빈 채로 기록된다.
-        return CompletedRep(rep, repFrames.map { it.toImmutable() })
+        //
+        // 내보내는 범위는 rep 창이 아니라 **아직 안 나간 전부**다. rep 밖 프레임도 여기
+        // 실려 나간다.
+        return CompletedRep(rep, drain())
+    }
+
+    /**
+     * 아직 내보내지 않은 프레임을 모두 낸다. 세션을 닫을 때 호출할 것.
+     *
+     * 마지막 rep 이후의 대기 프레임과, 중단된 채 끝난 rep의 프레임이 여기서 나간다.
+     * 호출하지 않으면 그만큼이 파일에 없다.
+     */
+    fun drain(): List<CaptureFrame> {
+        if (exportedUpTo >= frames.size) return emptyList()
+        val pending = frames.subList(exportedUpTo, frames.size).map { it.toImmutable() }
+        exportedUpTo = frames.size
+        return pending
+    }
+
+    /**
+     * rep 창을 실제 하강 시작으로 되돌린다.
+     *
+     * ## 왜 필요한가
+     * 상태머신은 **카운팅용**이라 rep을 늦게 연다. 임계값(`standingExitAngle` 내각 145°
+     * = 굴곡 35°)에 유지 시간 100ms와 스무딩 지연(EMA 120ms + median 133ms)이 겹치고,
+     * 하강 속도가 약 0.16°/ms이므로 20° 남짓이 더 밀린다. 실측 20 rep에서 rep 첫 프레임의
+     * 굴곡 중앙값이 **55.8°**(범위 48.9~68.4)였다 — 하강의 절반이 창 밖이었다.
+     *
+     * 결과로 `descent_duration_ms` 중앙값이 287ms인데 `ascent_duration_ms`는 681ms였다.
+     * 맨몸 스쿼트 하강이 상승보다 2.4배 빠를 수는 없다. 템포·진행도·단계 라벨이 전부
+     * 그만큼 틀어진다.
+     *
+     * ## 왜 임계값을 낮추지 않는가
+     * 카운팅 임계값은 이미 검증된 값이고, 낮춰도 스무딩 지연은 그대로 남는다. 대신
+     * **기록 창만** 뒤로 넓힌다 — 카운팅 임계값과 자세 판정 기준을 분리한 원칙을 rep
+     * 경계에도 적용하는 것이다.
+     *
+     * 뒤로 걸어가며 굴곡이 계속 줄어드는(=시간순으로는 내려가는 중인) 구간을 rep에
+     * 편입한다. 굴곡이 다시 늘어나면 그 앞은 다른 동작이므로 멈춘다.
+     *
+     * @param currentFlexion 지금 프레임의 굴곡. 하강 중 가장 깊은 값이다.
+     * @return 되돌린 rep 시작 인덱스. 되돌릴 게 없으면 지금 프레임의 인덱스.
+     */
+    private fun claimDescentStart(currentFlexion: Float?, nowMs: Long): Int {
+        // 지금 프레임은 아직 frames에 없다. 그 자리가 rep의 기본 시작점이다.
+        val startedAt = frames.size
+        var previous = currentFlexion ?: return startedAt
+        var index = startedAt
+        while (index > exportedUpTo) {
+            val candidate = frames[index - 1]
+            // 이미 내보낸 프레임은 되돌릴 수 없다. rep_id를 바꿔도 파일에는 안 반영된다.
+            // 앞선 rep의 프레임도 가져오지 않는다.
+            if (candidate.repId != null) break
+            val flexion = candidate.features.representativeKneeFlexion ?: break
+            // 뒤로 갈수록 굴곡이 줄어야 한다. 늘어나면 하강 시작을 이미 지났다.
+            if (flexion > previous + MONOTONE_TOLERANCE_DEGREES) break
+            if (nowMs - candidate.timestampMs > MAX_DESCENT_LOOKBACK_MS) break
+            index--
+            previous = flexion
+            candidate.repId = currentRepId
+            // 선 자세까지 닿았으면 거기가 하강 시작이다. 더 가면 직전 rep의 기립 구간이다.
+            val standing = standingFlexion
+            if (standing != null && flexion <= standing + STANDING_TOLERANCE_DEGREES) break
+        }
+        return index
     }
 
     /** 카메라·모델 전환처럼 시계열이 끊기면 호출한다. */
@@ -281,7 +357,11 @@ class CaptureRecorder(
     private class MutableFrame(
         val frameIndex: Int,
         val timestampMs: Long,
-        val repId: Int?,
+        /**
+         * 소속 rep. rep이 시작될 때 앞선 대기 프레임을 편입하므로 가변이다
+         * ([claimDescentStart] 참고).
+         */
+        var repId: Int?,
         /**
          * 단계 라벨. rep이 끝날 때 실제 최저점 기준으로 다시 붙이므로 가변이다.
          *
@@ -316,6 +396,25 @@ class CaptureRecorder(
          * 최저점으로 본다 — 두 구간의 진행도 방향이 반대이기 때문이다.
          */
         const val BOTTOM_PROGRESS = 0.95f
+
+        /**
+         * 하강 시작을 되돌릴 때 허용하는 굴곡 증가폭(도).
+         *
+         * 0으로 두면 좌표 지터 한 번에 걸음이 멈춘다. `PoseAnalyzer`가 아직 필터를
+         * 적용하지 않아 특징이 원본 좌표에서 나오므로 여유가 필요하다.
+         */
+        const val MONOTONE_TOLERANCE_DEGREES = 3f
+
+        /** 선 자세로 볼 굴곡 여유(도). 여기 닿으면 하강 시작으로 본다. */
+        const val STANDING_TOLERANCE_DEGREES = 5f
+
+        /**
+         * 되돌릴 수 있는 최대 시간(ms).
+         *
+         * 굴곡이 아주 천천히 늘기만 해도 걸음이 계속되는 것을 막는다 — 실측 하강이
+         * 300ms 남짓이므로 1.5초는 정상 하강을 자르지 않으면서 폭주는 막는 값이다.
+         */
+        const val MAX_DESCENT_LOOKBACK_MS = 1_500L
 
         /** 스무딩 창 초기 산출용. 실측 fps로 갱신하지 않는다 — 수집 중 창을 바꾸면 특징이 왜곡된다. */
         const val ASSUMED_FPS = 25.0

@@ -238,6 +238,9 @@ class CaptureViewModel @Inject constructor(
 
     /** 촬영을 끝내고 검토 단계로 간다. */
     fun finishRecording() {
+        // 남은 프레임을 먼저 내보낸다. 프레임은 rep이 끝날 때 배치로 나가므로, 마지막
+        // rep 이후의 대기 프레임과 중단된 채 끝난 rep의 프레임이 여기서만 나갈 수 있다.
+        recorder?.drain()?.forEach(logSession::logFrame)
         _uiState.update { it.copy(stage = CaptureStage.REVIEW) }
         cues.play(CaptureCues.Cue.SESSION_END)
         logSession.logReps(_uiState.value.reps)
@@ -387,6 +390,8 @@ class CaptureViewModel @Inject constructor(
         // 프레임을 rep 단위로 기록한다. 진행도는 rep이 끝나야 계산되므로 즉시 기록하면
         // 그 컬럼이 항상 비어 나간다. 매 프레임 스냅샷을 만드는 것도 프레임 수의 제곱만큼
         // 객체를 만들어 fps를 떨어뜨린다(실측 29.5 → 19.1).
+        //
+        // 배치에는 rep 밖 프레임도 실려 있다. 그래야 하강 시작 앞뒤가 파일에 남는다.
         completed.frames.forEach(logSession::logFrame)
 
         // rep이 하나 늘 때마다 세션 전체의 편차를 다시 계산한다. 중앙값과 MAD는
