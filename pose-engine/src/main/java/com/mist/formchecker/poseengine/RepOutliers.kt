@@ -51,6 +51,16 @@ object RepOutliers {
      * 촬영 각도에 무관하게 채워지는 값만 쓴다 — 정면 전용 특징을 넣으면 측면 세션에서
      * 전부 null이 되어 비교가 안 된다. 반대로 각도별 특징까지 넣으면 세션마다 기준이
      * 달라져 "같은 3 MAD"가 다른 뜻이 된다.
+     *
+     * ## `frame_count`를 뺀 이유
+     * 프레임 수는 동작 특징이 아니라 **샘플링 부산물**이다. `duration_ms × fps`이고 시간은
+     * 이미 별도 특징이므로, 남는 정보는 fps뿐이다. 그리고 fps는 세션 안에서 일정하지
+     * 않다 — RTMPose 연속 추론에 발열 스로틀링이 걸려 실측 우측면 세션이 26.8 → 19.2 fps로
+     * 떨어졌다. 그 결과 앞쪽 rep 4개가 "프레임 수가 많다"는 이유로 이상치가 됐는데,
+     * 그건 동작이 달랐다는 뜻이 아니라 **그때 기기가 시원했다**는 뜻이다.
+     *
+     * 실측에서 이 특징을 빼면 우측면 5개 → 4개가 된다. 남는 4개는 `duration_ms` 기준이고
+     * 실제로 더 느렸으므로(2553·2591·2327ms vs 중앙값 2032ms) 정탐이다.
      */
     private val FEATURES: List<Pair<String, (CaptureRep) -> Float?>> = listOf(
         "duration_ms" to { it.durationMs.toFloat() },
@@ -58,7 +68,6 @@ object RepOutliers {
         "max_depth_ratio" to { it.maxDepthRatio },
         "min_thigh_angle" to { it.minThighAngle },
         "max_trunk_lean" to { it.maxTrunkLean },
-        "frame_count" to { it.frameCount.toFloat() },
     )
 
     /**

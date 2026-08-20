@@ -144,6 +144,12 @@ object CaptureExport {
         add(Column("max_hip_shift") { it.maxHipShift })
         add(Column("valid_frame_ratio") { it.validFrameRatio })
         add(Column("frame_count") { it.frameCount })
+        // 샘플링 조밀도. 세션 단위 analysis_fps 하나로는 발열 스로틀링에 따른 세션 내
+        // 저하를 볼 수 없다 (실측 26.8 → 19.2 fps인데 세션 컬럼은 27.9였다).
+        add(Column("frame_interval_ms") { it.frameIntervalMs })
+        add(Column("max_frame_interval_ms") { it.maxFrameIntervalMs })
+        // 이 값이 max_frame_interval_ms의 몇 배인지가 "극값을 놓쳤을 수 있는가"의 답이다.
+        add(Column("bottom_dwell_ms") { it.bottomDwellMs })
         // 세션 촬영 의도. rep마다 사람이 고른 값이 아니라 세션 단위 선언이다.
         add(Column("intent") { it.intent.name })
         // 같은 세션 다른 rep 대비 최대 편차(MAD 단위). 자동 판정의 근거이므로 함께 남긴다 —

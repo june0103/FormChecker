@@ -328,6 +328,67 @@ class CaptureRecorderTest {
         )
     }
 
+    /**
+     * 발열 스로틀링으로 fps가 세션 안에서 떨어지므로 샘플링 조밀도를 rep마다 재야 한다.
+     * 세션 단위 `analysis_fps` 하나로는 후반의 저하가 보이지 않는다 (실측 26.8 → 19.2인데
+     * 세션 컬럼에는 27.9만 남았다).
+     */
+    @Test
+    fun `rep마다 프레임 간격을 기록한다`() {
+        val (_, completed) = record(squatSequence())
+        val rep = completed.first().rep
+
+        assertEquals("간격 중앙값이 프레임 주기와 같아야 한다", frameIntervalMs.toFloat(), rep.frameIntervalMs!!, 0.01f)
+        assertEquals("최댓값도 같다 — 균일한 시퀀스다", frameIntervalMs, rep.maxFrameIntervalMs)
+    }
+
+    /**
+     * 중앙값은 한 번의 멈춤을 숨긴다. 극값을 놓치는 것은 평균적으로 느린 것이 아니라
+     * 하필 최저점에서 한 프레임이 늦는 경우다.
+     */
+    @Test
+    fun `프레임 간격 최댓값이 멈춤을 드러낸다`() {
+        val recorder = CaptureRecorder(info, calibration(), CaptureIntent.NORMAL)
+        val completed = mutableListOf<CaptureRecorder.CompletedRep>()
+        var extra = 0L
+        squatSequence().forEachIndexed { index, flexion ->
+            // 최저점 근처에서 한 번만 200ms 멈춘다.
+            if (flexion >= 100f && extra == 0L) extra = 200L
+            val pose = squatPose(flexion)
+            recorder.accept(pose, pose, index * frameIntervalMs + extra)?.let(completed::add)
+        }
+        val rep = completed.first().rep
+
+        assertEquals("중앙값은 그대로", frameIntervalMs.toFloat(), rep.frameIntervalMs!!, 0.01f)
+        assertTrue(
+            "최댓값이 멈춤을 드러내야 한다 (실제: ${rep.maxFrameIntervalMs}ms)",
+            rep.maxFrameIntervalMs!! >= 200L,
+        )
+    }
+
+    /**
+     * 최저점 체류는 프레임 간격과 함께 봐야 의미가 있다 — 그 비율이 "극값을 놓쳤을 수
+     * 있는가"의 답이다. BOTTOM 라벨을 그대로 쓰므로 별도 임계값이 생기지 않는다.
+     */
+    @Test
+    fun `최저점 체류 시간을 기록한다`() {
+        val holdFrames = 5
+        val (_, completed) = record(squatSequence(holdFrames = holdFrames))
+        val rep = completed.first().rep
+        val repFrames = completed.first().frames.filter { it.repId != null }
+
+        val bottoms = repFrames.filter { it.phase == CapturePhase.BOTTOM }
+        assertEquals(
+            "BOTTOM 프레임의 시간 폭과 같아야 한다",
+            bottoms.last().timestampMs - bottoms.first().timestampMs,
+            rep.bottomDwellMs,
+        )
+        assertTrue(
+            "최저점 유지 프레임 수만큼은 나와야 한다 (실제: ${rep.bottomDwellMs}ms)",
+            rep.bottomDwellMs!! >= (holdFrames - 1) * frameIntervalMs,
+        )
+    }
+
     /** 최저점 유지 구간이 실제 최저점 근처에만 붙는지. 카운팅 임계값 기준이면 과반이 BOTTOM이 된다. */
     @Test
     fun `BOTTOM 라벨이 최저점 근처에만 붙는다`() {
