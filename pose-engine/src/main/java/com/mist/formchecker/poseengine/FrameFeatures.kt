@@ -174,20 +174,40 @@ data class FrameFeatures(
                 null
             }
 
+            /**
+             * 힙 기준점.
+             *
+             * **측면에서는 좌우 중점을 쓰지 않는다.** 먼 쪽 힙은 몸에 가려져 위치가
+             * 추정값이고, 실측 중앙값이 0.518로 하한 0.5를 자주 못 넘긴다 — 그 한 관절
+             * 때문에 499프레임 중 146프레임의 상체·엉덩이 특징이 통째로 비었다.
+             * 활성 쪽 하나로 고정하면 프레임마다 기준이 바뀌지 않고 가용성도 확보된다
+             * (문서 §4.3).
+             */
+            val hipReference = if (view.isSide && sideHip != null) {
+                if (ok(sideHip)) p(sideHip) else null
+            } else if (ok(KeypointType.LEFT_HIP) && ok(KeypointType.RIGHT_HIP)) {
+                Geometry.midpoint(p(KeypointType.LEFT_HIP), p(KeypointType.RIGHT_HIP))
+            } else {
+                null
+            }
+
+            /** 정면 전용 특징은 좌우 중점이 필요하다. */
             val hipCenter = if (ok(KeypointType.LEFT_HIP) && ok(KeypointType.RIGHT_HIP)) {
                 Geometry.midpoint(p(KeypointType.LEFT_HIP), p(KeypointType.RIGHT_HIP))
             } else {
                 null
             }
 
-            val trunkLean = if (view.isSide && hipCenter != null && ok(KeypointType.NECK)) {
-                Geometry.angleFromVertical(hipCenter, p(KeypointType.NECK))
+            val trunkLean = if (view.isSide && hipReference != null && ok(KeypointType.NECK)) {
+                Geometry.angleFromVertical(hipReference, p(KeypointType.NECK))
             } else {
                 null
             }
 
-            val hipDropRatio = if (view.isSide && hipCenter != null && legLength > Geometry.EPSILON) {
-                (hipCenter.second - calibration.standingHipY) / legLength
+            val hipDropRatio = if (
+                view.isSide && hipReference != null && legLength > Geometry.EPSILON
+            ) {
+                (hipReference.second - calibration.standingHipY) / legLength
             } else {
                 null
             }
@@ -196,10 +216,10 @@ data class FrameFeatures(
             // 따라 달라져 세션 기준선으로 쓰기 어렵다). 대신 발목을 기준으로 잰다 —
             // 발은 스쿼트 중 고정돼 있어야 하므로 더 안정적이다.
             val hipTravelRatio = if (
-                view.isSide && hipCenter != null && sideAnkle != null && ok(sideAnkle) &&
+                view.isSide && hipReference != null && sideAnkle != null && ok(sideAnkle) &&
                 legLength > Geometry.EPSILON
             ) {
-                (hipCenter.first - p(sideAnkle).first) / legLength
+                (hipReference.first - p(sideAnkle).first) / legLength
             } else {
                 null
             }
@@ -325,15 +345,32 @@ data class FrameFeatures(
                 trunkLateralLean = trunkLateralLean,
                 leftFootRotation = footRotation(Side.LEFT),
                 rightFootRotation = footRotation(Side.RIGHT),
-                minConfidence = LOWER_BODY.minOf { pose[it].confidence },
+                minConfidence = confidenceOf(pose, view, activeSide),
             )
         }
 
-        /** 자세 판정에 쓰이는 하체·몸통 키포인트. 프레임 대표 신뢰도의 근거. */
-        private val LOWER_BODY = listOf(
-            KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP,
-            KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE,
-            KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE,
-        )
+        /**
+         * 프레임 대표 신뢰도 = **실제로 쓰는 관절**의 최솟값.
+         *
+         * 측면에서 좌우 6관절을 모두 보면 먼 쪽 힙 하나 때문에 프레임의 30%가 "평가 불가"가
+         * 된다(실측: 먼 쪽 힙 중앙값 0.518, 499프레임 중 146번 하한 미달). 그런데 측면
+         * 특징은 애초에 먼 쪽을 쓰지 않으므로, 쓰지 않는 관절로 프레임을 버리는 셈이었다.
+         */
+        private fun confidenceOf(pose: Pose, view: CaptureView, activeSide: Side?): Float {
+            val joints = if (view.isSide && activeSide != null) {
+                listOf(
+                    Geometry.hip(activeSide),
+                    Geometry.knee(activeSide),
+                    Geometry.ankle(activeSide),
+                )
+            } else {
+                listOf(
+                    KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP,
+                    KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE,
+                    KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE,
+                )
+            }
+            return joints.minOf { pose[it].confidence }
+        }
     }
 }

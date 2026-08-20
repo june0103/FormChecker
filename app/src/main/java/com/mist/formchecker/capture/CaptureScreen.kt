@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,7 +41,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CaptureRep
 import com.mist.formchecker.poseengine.CaptureView
-import com.mist.formchecker.poseengine.RepLabel
+import com.mist.formchecker.poseengine.CaptureIntent
+import com.mist.formchecker.poseengine.RepOutliers
 import com.mist.formchecker.poseengine.StandingCalibration
 import com.mist.formchecker.ui.screen.workout.CameraPreview
 import com.mist.formchecker.ui.screen.workout.SkeletonOverlay
@@ -79,7 +81,8 @@ fun CaptureScreen(
 
         CaptureStage.REVIEW -> ReviewStage(
             state = state,
-            onLabel = viewModel::labelRep,
+            onInclude = viewModel::setRepInclusion,
+            onClearDecision = viewModel::clearRepInclusion,
             onFinish = viewModel::finishSession,
             modifier = modifier,
         )
@@ -153,6 +156,51 @@ private fun SetupStage(
                     }
                 }
             }
+        }
+
+        HorizontalDivider()
+        Text("촬영 의도", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "이번 세션에서 무엇을 찍을지 고릅니다. rep마다 새로 판정하지 않습니다 — " +
+                "촬영 중에는 화면을 보지 못하고, 판단 기준(정상 범위)이 아직 없기 때문입니다. " +
+                "의도만 받고 일관성은 데이터로 판단합니다.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            CaptureIntent.entries.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    row.forEach { intent ->
+                        val selected = intent == state.intent
+                        val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
+                        if (selected) {
+                            Button(
+                                onClick = { viewModel.selectIntent(intent) },
+                                modifier = buttonModifier,
+                            ) {
+                                Text(intent.displayName, style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { viewModel.selectIntent(intent) },
+                                modifier = buttonModifier,
+                            ) {
+                                Text(intent.displayName, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    // 마지막 줄이 3개 미만이면 남는 칸을 추가해 버튼 폭을 맞춘다.
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+        if (!state.intent.forReference) {
+            Text(
+                "의도적 오류 세션입니다 — 정상 범위에는 넣지 않고, 임계값이 이 오류를 " +
+                    "잡는지 검증하는 데 사용합니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = FeedbackInfo,
+            )
         }
 
         HorizontalDivider()
@@ -412,20 +460,25 @@ private fun StageControls(
 // ── 5단계: 검토·라벨링 ─────────────────────────────────────
 
 /**
- * rep별 라벨링 (문서 §14.2).
+ * rep 검토 — **확인이지 판정이 아니다.**
  *
- * ## 왜 촬영 후에 라벨을 정하는가
- * 촬영 전에 "정상으로 찍을 것"이라고 선언해도 실제로 정상이었는지는 찍고 봐야 안다.
- * 잘못 찍힌 rep이 기준값에 들어가면 그 오류가 임계값에 박힌다.
+ * ## 왜 정상/오류를 묻지 않는가
+ * 촬영자에게 "이 rep이 정상이었나"를 물으면 알 수 없는 것을 묻는 것이다. 측면 촬영은 화면을 보지 못하고, 봤어도 판단 기준(지금 만들려는 정상
+ * 범위)이 아직 없다. 그 추측이 기준 표본 포함 여부가 되면 순환이 된다.
  *
- * ## 자동 제외와 검토를 함께 본다
- * 검토자가 `정상`을 줘도 유효 프레임 비율이 90% 미달이면 기준 표본에 넣지 않는다
- * (문서 §14.4). 제외된 rep도 삭제하지 않고 이유를 보관한다.
+ * 대신 이렇게 나눈다.
+ * - **의도**는 세션 단위로 받는다 (촬영자가 확실히 아는 것)
+ * - **데이터 품질**은 자동 판정한다 (유효 프레임 비율·완주·신뢰도)
+ * - **일관성**은 [RepOutliers]가 세션 안에서 판단한다 (중앙값·MAD)
+ * - 이상치로 걸린 것만 사람에게 **확인**을 요청한다
+ *
+ * 실측 21 rep에서 확인이 필요했던 것은 4개(19%)였다. 나머지는 사람이 손대지 않는다.
  */
 @Composable
 private fun ReviewStage(
     state: CaptureUiState,
-    onLabel: (Int, RepLabel) -> Unit,
+    onInclude: (Int, Boolean) -> Unit,
+    onClearDecision: (Int) -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -440,25 +493,49 @@ private fun ReviewStage(
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
         Text(
-            "rep 검토",
+            "수집 결과",
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            "기준 표본에 넣을 rep을 고릅니다. 정상으로 표시해도 데이터 품질이 미달이면 " +
-                "자동으로 제외되고 그 이유가 함께 기록됩니다.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            "rep ${state.reps.size}개 · 승인 ${state.approvedReps}개 · " +
-                "프레임 ${state.recordedFrames}개",
+            "rep ${state.reps.size}개 · 포함 ${state.approvedReps}개 · 프레임 ${state.recordedFrames}개",
             style = MaterialTheme.typography.bodyMedium,
             color = LimeGreen,
         )
+        Text(
+            "의도: ${state.intent.displayName} · ${state.view.displayName}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (state.repsNeedingReview > 0) {
+            Text(
+                "확인이 필요한 rep ${state.repsNeedingReview}개 — 다른 rep과 크게 다릅니다. " +
+                    "동작이 실제로 달랐으면 제외하고, 괜찮았으면 포함하세요.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = FeedbackWarning,
+            )
+        } else if (state.reps.size < RepOutliers.MIN_SAMPLES) {
+            Text(
+                "rep이 ${RepOutliers.MIN_SAMPLES}개 미만이면 일관성을 판단할 표본이 부족해 " +
+                    "이상치를 판정하지 않습니다. 전부 포함됩니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                "확인이 필요한 rep이 없습니다. 모든 rep이 자동 판정을 따릅니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         state.reps.forEach { rep ->
-            RepReviewRow(rep = rep, onLabel = { onLabel(rep.repId, it) })
+            RepReviewRow(
+                rep = rep,
+                onInclude = { onInclude(rep.repId, it) },
+                onClearDecision = { onClearDecision(rep.repId) },
+            )
         }
 
         if (shareFailed) {
@@ -492,12 +569,21 @@ private fun ReviewStage(
 }
 
 @Composable
-private fun RepReviewRow(rep: CaptureRep, onLabel: (RepLabel) -> Unit) {
+private fun RepReviewRow(
+    rep: CaptureRep,
+    onInclude: (Boolean) -> Unit,
+    onClearDecision: () -> Unit,
+) {
+    val flagged = RepOutliers.isOutlier(rep.deviation)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                if (flagged) {
+                    FeedbackWarning.copy(alpha = 0.12f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                },
                 RoundedCornerShape(12.dp),
             )
             .padding(Spacing.sm),
@@ -516,29 +602,46 @@ private fun RepReviewRow(rep: CaptureRep, onLabel: (RepLabel) -> Unit) {
         )
         Text(
             buildString {
-                append("유효 ${"%.0f".format(rep.validFrameRatio * 100)}%")
-                append(" · 프레임 ${rep.frameCount}")
-                if (!rep.formEvaluable) append(" · 자세 평가 불가")
+                append(if (rep.includeInReference) "포함" else "제외")
                 rep.exclusionReason?.let { append(" · ${it.message}") }
+                // 편차를 숫자로 보여준다. "왜 걸렸는지"를 알아야 확인이 판단이 된다.
+                rep.deviation?.let { append(" · 편차 ${"%.1f".format(it)} MAD") }
+                append(" · 유효 ${"%.0f".format(rep.validFrameRatio * 100)}%")
+                append(" · 프레임 ${rep.frameCount}")
             },
             style = MaterialTheme.typography.labelSmall,
             color = if (rep.includeInReference) LimeGreen else TextMuted,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            listOf(RepLabel.GOOD, RepLabel.BAD, RepLabel.UNCERTAIN, RepLabel.EXCLUDE)
-                .forEach { label ->
-                    val selected = rep.label == label
-                    val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
-                    if (selected) {
-                        Button(onClick = { onLabel(label) }, modifier = buttonModifier) {
-                            Text(label.displayName, style = MaterialTheme.typography.labelSmall)
-                        }
-                    } else {
-                        OutlinedButton(onClick = { onLabel(label) }, modifier = buttonModifier) {
-                            Text(label.displayName, style = MaterialTheme.typography.labelSmall)
-                        }
+
+        // 확인 버튼은 이상치거나 사람이 이미 손댄 rep에만 보여준다. 나머지는 자동
+        // 판정을 따를 필요가 없으므로 버튼이 있으면 "판정하라"는 잘못된 신호를 준다.
+        if (flagged || rep.manualInclude != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
+                if (rep.manualInclude == true) {
+                    Button(onClick = { onInclude(true) }, modifier = buttonModifier) {
+                        Text("포함", style = MaterialTheme.typography.labelSmall)
+                    }
+                } else {
+                    OutlinedButton(onClick = { onInclude(true) }, modifier = buttonModifier) {
+                        Text("포함", style = MaterialTheme.typography.labelSmall)
                     }
                 }
+                if (rep.manualInclude == false) {
+                    Button(onClick = { onInclude(false) }, modifier = buttonModifier) {
+                        Text("제외", style = MaterialTheme.typography.labelSmall)
+                    }
+                } else {
+                    OutlinedButton(onClick = { onInclude(false) }, modifier = buttonModifier) {
+                        Text("제외", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (rep.manualInclude != null) {
+                    OutlinedButton(onClick = onClearDecision, modifier = buttonModifier) {
+                        Text("자동", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
     }
 }

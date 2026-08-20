@@ -144,7 +144,14 @@ object CaptureExport {
         add(Column("max_hip_shift") { it.maxHipShift })
         add(Column("valid_frame_ratio") { it.validFrameRatio })
         add(Column("frame_count") { it.frameCount })
-        add(Column("label") { it.label.name })
+        // 세션 촬영 의도. rep마다 사람이 고른 값이 아니라 세션 단위 선언이다.
+        add(Column("intent") { it.intent.name })
+        // 같은 세션 다른 rep 대비 최대 편차(MAD 단위). 자동 판정의 근거이므로 함께 남긴다 —
+        // 경계를 나중에 옮기려면 경계 근처 값들이 보여야 한다.
+        add(Column("deviation_mad") { it.deviation })
+        add(Column("is_outlier") { if (RepOutliers.isOutlier(it.deviation)) 1 else 0 })
+        // 사람이 확인해 덮어쓴 경우만 값이 있다. 비어 있으면 자동 판정을 따랐다는 뜻이다.
+        add(Column("manual_include") { it.manualInclude?.let { v -> if (v) 1 else 0 } })
         add(Column("include_in_reference") { if (it.includeInReference) 1 else 0 })
         // 제외된 rep도 삭제하지 않고 이유를 보관한다 (문서 §14.4).
         add(Column("exclusion_reason") { it.exclusionReason?.name })

@@ -78,17 +78,40 @@ data class CaptureSessionInfo(
 }
 
 /**
- * rep 라벨 (문서 §14.2).
+ * 촬영 의도. **세션 단위**로 한 번 선언한다.
  *
- * **촬영 후에 정한다.** 촬영 전에 "정상으로 찍을 것"이라고 선언해도 실제로 정상이었는지는
- * 찍고 봐야 안다. 그래서 기록 시점에는 [UNREVIEWED]로 남고, 검토 화면에서 확정한다.
+ * ## 왜 rep 단위 라벨이 아닌가
+ * 촬영자에게 "이 rep이 정상이었나"를 물으면 **알 수 없는 것을 묻는 것**이다. 측면 촬영은
+ * 화면을 보지 못하고, 봤어도 판단 기준(=지금 만들려는 정상 범위)이 아직 없다. 그 추측이
+ * 기준 표본 포함 여부가 되면 순환이 된다.
+ *
+ * 촬영자가 확실히 아는 것은 **의도**다 — "정상으로 찍으려 했다", "무릎만 굽히려 했다".
+ * 의도는 세션 단위이고 한 번만 고르므로 실수도 적다. "그 의도대로 됐는가"는
+ * [RepOutliers]가 데이터로 판단한다.
  */
-enum class RepLabel(val displayName: String, val includeInReference: Boolean) {
-    UNREVIEWED("미검토", false),
-    GOOD("정상", true),
-    BAD("오류", false),
-    UNCERTAIN("애매", false),
-    EXCLUDE("제외", false),
+enum class CaptureIntent(
+    val displayName: String,
+    /** 기준 표본(정상 범위)을 만드는 데 쓸 세션인가. */
+    val forReference: Boolean,
+) {
+    /** 올바른 자세. 정상 범위의 재료다. */
+    NORMAL("정상", true),
+
+    // ── 의도적 오류. 임계값이 오류를 잡는지 검증하는 데 쓴다 ──
+    /** 목표 깊이까지 앉지 않음. */
+    SHALLOW("얕게", false),
+
+    /** 엉덩이를 뒤로 빼지 않고 무릎만 굽힘. */
+    KNEE_ONLY("무릎만", false),
+
+    /** 최저점에서 뒤꿈치를 듦. */
+    HEEL_RISE("뒤꿈치", false),
+
+    /** 상체를 과도하게 숙임. */
+    TRUNK_LEAN("상체숙임", false),
+
+    /** 위에 없는 오류. 메모는 신발 필드 등에 남긴다. */
+    OTHER("기타", false),
 }
 
 /**
@@ -102,7 +125,18 @@ enum class RepExclusionReason(val message: String) {
     INCOMPLETE_CYCLE("동작 단계가 완결되지 않음"),
     LOW_CONFIDENCE("필수 관절 신뢰도 미달"),
     VIEW_MISMATCH("촬영 각도가 선택과 다름"),
-    TOO_FAST("지속시간 하한 미달"),
-    TOO_SLOW("지속시간 상한 초과"),
-    REVIEWER_EXCLUDED("검토에서 제외"),
+
+    /**
+     * 같은 세션의 다른 rep들과 크게 다르다 ([RepOutliers.THRESHOLD] 초과).
+     *
+     * "틀린 자세"라는 뜻이 아니라 "일관되지 않다"는 뜻이다. 기준 표본은 일관된 동작에서
+     * 나와야 하므로 제외하되, 사람이 확인해 되돌릴 수 있게 한다.
+     */
+    OUTLIER("다른 rep과 크게 다름"),
+
+    /** 의도가 정상이 아닌 세션. 오류 검증용이므로 정상 범위에는 넣지 않는다. */
+    NOT_REFERENCE_INTENT("정상 의도 세션이 아님"),
+
+    /** 사람이 명시적으로 제외했다. */
+    MANUALLY_EXCLUDED("확인 후 제외"),
 }

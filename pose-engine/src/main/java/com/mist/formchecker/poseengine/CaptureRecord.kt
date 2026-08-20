@@ -91,39 +91,76 @@ data class CaptureRep(
     /** 특징을 계산할 수 있었던 프레임 비율. */
     val validFrameRatio: Float,
     val frameCount: Int,
-    /** 검토에서 확정한 라벨. 기록 시점에는 [RepLabel.UNREVIEWED]. */
-    val label: RepLabel,
-    /** 기준 표본에 포함할지. 라벨과 자동 제외 조건을 함께 본 결과. */
-    val includeInReference: Boolean,
-    val exclusionReason: RepExclusionReason?,
+    /** 세션 촬영 의도. rep마다 사람이 고르는 값이 아니다 ([CaptureIntent] 참고). */
+    val intent: CaptureIntent,
+    /**
+     * 같은 세션 다른 rep들 대비 최대 편차(MAD 단위). 표본이 적으면 null.
+     *
+     * rep이 끝난 시점에는 세션 전체를 모르므로 나중에 [RepOutliers]가 채운다.
+     */
+    val deviation: Float? = null,
+    /**
+     * 사람이 명시적으로 정한 포함 여부. null이면 자동 판정을 따른다.
+     *
+     * 이상치로 걸린 rep을 확인해 "괜찮다"고 되돌리거나, 자동으로 통과한 rep을 "아니다"라고
+     * 빼는 용도다. **판정이 아니라 확인**이며, 대부분의 rep에서는 null로 남는다.
+     */
+    val manualInclude: Boolean? = null,
 ) {
     val durationMs: Long get() = endMs - startMs
 
     /**
-     * 자동 제외 조건을 적용한다 (문서 §14.4).
+     * 자동 제외 사유. 없으면 null (문서 §14.4).
      *
-     * 검토자가 `GOOD`을 줘도 데이터 품질이 미달이면 기준 표본에 넣지 않는다. 반대로
-     * 품질이 좋아도 검토 전이면 넣지 않는다 — 둘 다 통과해야 한다.
+     * 순서가 우선순위다 — 덮어쓸 수 없는 사유가 먼저고 그다음이 일관성이다. 품질이 미달인
+     * rep을 "이상치"로 보고하면 원인을 잘못 짚게 된다.
      */
-    fun withLabel(newLabel: RepLabel): CaptureRep {
-        val auto = autoExclusion()
-        return copy(
-            label = newLabel,
-            includeInReference = newLabel.includeInReference && auto == null,
-            exclusionReason = auto ?: if (newLabel.includeInReference) {
-                null
-            } else {
-                RepExclusionReason.REVIEWER_EXCLUDED
-            },
-        )
-    }
+    val autoExclusion: RepExclusionReason?
+        get() = hardExclusion
+            ?: RepExclusionReason.OUTLIER.takeIf { RepOutliers.isOutlier(deviation) }
 
-    private fun autoExclusion(): RepExclusionReason? = when {
-        validFrameRatio < MIN_VALID_FRAME_RATIO -> RepExclusionReason.LOW_VALID_FRAME_RATIO
-        !counted -> RepExclusionReason.INCOMPLETE_CYCLE
-        !formEvaluable -> RepExclusionReason.LOW_CONFIDENCE
-        else -> null
-    }
+    /** 사람이 확인해야 하는가. 이상치이고 아직 판단하지 않은 경우. */
+    val needsReview: Boolean
+        get() = manualInclude == null && RepOutliers.isOutlier(deviation)
+
+    /**
+     * 기준 표본에 포함되는가.
+     *
+     * 사람의 명시적 판단이 자동 판정을 덮어쓴다 — 단, [hardExclusion]은 덮어쓸 수 없다.
+     * 사람이 뒤집을 수 있는 것은 "이 rep이 다른 rep과 다른가"뿐이다.
+     */
+    val includeInReference: Boolean
+        get() = when {
+            hardExclusion != null -> false
+            manualInclude != null -> manualInclude
+            else -> autoExclusion == null
+        }
+
+    val exclusionReason: RepExclusionReason?
+        get() = when {
+            hardExclusion != null -> hardExclusion
+            manualInclude == true -> null
+            manualInclude == false -> RepExclusionReason.MANUALLY_EXCLUDED
+            else -> autoExclusion
+        }
+
+    /**
+     * 사람이 덮어쓸 수 없는 제외 사유. 두 종류다.
+     *
+     * **데이터 품질**은 사람이 "괜찮다"고 해도 계산 자체가 부정확하다.
+     *
+     * **촬영 의도**는 사람이 세션 단위로 선언한 사실이므로 확인으로 뒤집을 대상이 아니다.
+     * 여기에 두지 않으면 오류 의도 세션의 rep이 이상치로 걸려 확인 버튼이 뜨고, 거기서
+     * "포함"을 누르는 순간 의도적 오류가 정상 범위의 재료로 들어간다.
+     */
+    private val hardExclusion: RepExclusionReason?
+        get() = when {
+            validFrameRatio < MIN_VALID_FRAME_RATIO -> RepExclusionReason.LOW_VALID_FRAME_RATIO
+            !counted -> RepExclusionReason.INCOMPLETE_CYCLE
+            !formEvaluable -> RepExclusionReason.LOW_CONFIDENCE
+            !intent.forReference -> RepExclusionReason.NOT_REFERENCE_INTENT
+            else -> null
+        }
 
     companion object {
         /** 문서 §14.4 — 필수 관절 유효 프레임 비율 90% 이상. */

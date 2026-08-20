@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.camera.core.CameraSelector
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mist.formchecker.poseengine.CaptureIntent
 import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CaptureRecorder
 import com.mist.formchecker.poseengine.CaptureRep
@@ -14,7 +15,7 @@ import com.mist.formchecker.poseengine.CaptureView
 import com.mist.formchecker.poseengine.MedianWindow
 import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngineHandle
-import com.mist.formchecker.poseengine.RepLabel
+import com.mist.formchecker.poseengine.RepOutliers
 import com.mist.formchecker.poseengine.RtmPoseEngine
 import com.mist.formchecker.poseengine.StandingCalibration
 import com.mist.formchecker.ui.screen.workout.PoseAnalyzer
@@ -56,6 +57,13 @@ data class CaptureUiState(
     // ── 세션 정보 ───────────────────────────────────────────
     val personId: String = "P001",
     val view: CaptureView = CaptureView.SIDE_LEFT,
+    /**
+     * 촬영 의도. 세션 단위로 한 번 고른다.
+     *
+     * rep마다 "정상이었나"를 묻지 않는 이유는 촬영자가 그걸 알 수 없기 때문이다
+     * ([CaptureIntent] 참고). 의도만 받고 일관성은 데이터로 판단한다.
+     */
+    val intent: CaptureIntent = CaptureIntent.NORMAL,
     val footwear: String = "",
     val cameraHeightCm: String = "",
     val cameraDistanceCm: String = "",
@@ -83,8 +91,11 @@ data class CaptureUiState(
     /** 카메라가 살아 있어야 하는 단계. */
     val needsCamera: Boolean get() = stage != CaptureStage.SETUP && stage != CaptureStage.REVIEW
 
-    /** 기준 표본으로 승인된 rep 수. */
+    /** 기준 표본에 포함된 rep 수. */
     val approvedReps: Int get() = reps.count { it.includeInReference }
+
+    /** 사람이 확인해야 하는 rep 수. 이상치이고 아직 판단하지 않은 것. */
+    val repsNeedingReview: Int get() = reps.count { it.needsReview }
 }
 
 /**
@@ -146,6 +157,7 @@ class CaptureViewModel @Inject constructor(
     // ── 세션 설정 ───────────────────────────────────────────
 
     fun updatePersonId(value: String) = _uiState.update { it.copy(personId = value) }
+    fun selectIntent(intent: CaptureIntent) = _uiState.update { it.copy(intent = intent) }
     fun updateFootwear(value: String) = _uiState.update { it.copy(footwear = value) }
     fun updateCameraHeight(value: String) = _uiState.update { it.copy(cameraHeightCm = value) }
     fun updateCameraDistance(value: String) = _uiState.update { it.copy(cameraDistanceCm = value) }
@@ -212,7 +224,7 @@ class CaptureViewModel @Inject constructor(
             capturedAt = isoNow(),
         )
         sessionInfo = info
-        recorder = CaptureRecorder(info, calibration)
+        recorder = CaptureRecorder(info, calibration, state.intent)
 
         logSession.open(
             CaptureSessionRecord(
@@ -238,15 +250,30 @@ class CaptureViewModel @Inject constructor(
     // ── 검토·라벨링 ─────────────────────────────────────────
 
     /**
-     * rep 라벨을 확정한다.
+     * 이상치로 걸린 rep을 사람이 확인해 포함/제외를 정한다.
      *
-     * 자동 제외 조건(유효 프레임 비율, 미완주, 신뢰도)은 [CaptureRep.withLabel]이 함께
-     * 적용한다 — 검토자가 `GOOD`을 줘도 데이터 품질이 미달이면 기준 표본에 넣지 않는다.
+     * **판정이 아니라 확인**이다. 대부분의 rep은 자동 판정을 따르고 여기 오지 않는다.
+     * 데이터 품질 미달(유효 프레임 90% 미만 등)은 여기서 덮어쓸 수 없다 — 사람이
+     * "괜찮다"고 해도 계산 자체가 부정확하다.
      */
-    fun labelRep(repId: Int, label: RepLabel) {
+    fun setRepInclusion(repId: Int, include: Boolean) {
         _uiState.update { state ->
             state.copy(
-                reps = state.reps.map { if (it.repId == repId) it.withLabel(label) else it },
+                reps = state.reps.map {
+                    if (it.repId == repId) it.copy(manualInclude = include) else it
+                },
+            )
+        }
+        logSession.logReps(_uiState.value.reps)
+    }
+
+    /** 사람의 판단을 되돌려 자동 판정으로 되돌아간다. */
+    fun clearRepInclusion(repId: Int) {
+        _uiState.update { state ->
+            state.copy(
+                reps = state.reps.map {
+                    if (it.repId == repId) it.copy(manualInclude = null) else it
+                },
             )
         }
         logSession.logReps(_uiState.value.reps)
@@ -263,6 +290,7 @@ class CaptureViewModel @Inject constructor(
                 stage = CaptureStage.SETUP,
                 personId = it.personId,
                 view = it.view,
+                intent = it.intent,
                 footwear = it.footwear,
                 cameraHeightCm = it.cameraHeightCm,
                 cameraDistanceCm = it.cameraDistanceCm,
@@ -356,23 +384,38 @@ class CaptureViewModel @Inject constructor(
         // 필터 전·후 좌표를 모두 넘긴다. 지금은 PoseAnalyzer가 필터를 적용하지 않으므로
         // 두 값이 같다 — 필터를 넣게 되면 여기만 바꾸면 되고, 원본이 남아 있어 과거
         // 데이터를 다시 계산할 수 있다.
-        val rep = recorder.accept(
+        val completed = recorder.accept(
             rawPose = result.pose,
             filteredPose = result.pose,
             timestampMs = result.timestampMs,
-        )
+        ) ?: return
 
-        // 프레임은 매번 기록한다. 채널로 넘기므로 분석 스레드는 막히지 않는다.
-        recorder.build().frames.lastOrNull()?.let(logSession::logFrame)
+        // 프레임을 rep 단위로 기록한다. 진행도는 rep이 끝나야 계산되므로 즉시 기록하면
+        // 그 컬럼이 항상 비어 나간다. 매 프레임 스냅샷을 만드는 것도 프레임 수의 제곱만큼
+        // 객체를 만들어 fps를 떨어뜨린다(실측 29.5 → 19.1).
+        completed.frames.forEach(logSession::logFrame)
 
-        if (rep != null) {
-            _uiState.update { it.copy(reps = it.reps + rep) }
-            logSession.logReps(_uiState.value.reps)
-            if (rep.counted) cues.play(CaptureCues.Cue.REP_DONE)
+        // rep이 하나 늘 때마다 세션 전체의 편차를 다시 계산한다. 중앙값과 MAD는
+        // 표본이 늘면 바뀌므로, 마지막 rep만 계산하면 앞선 rep들의 판정이 낡는다.
+        _uiState.update { state ->
+            state.copy(reps = withDeviations(state.reps + completed.rep))
         }
+        logSession.logReps(_uiState.value.reps)
+        if (completed.rep.counted) cues.play(CaptureCues.Cue.REP_DONE)
     }
 
     // ── 엔진 ────────────────────────────────────────────────
+
+    /**
+     * 세션 내 편차를 다시 계산해 붙인다.
+     *
+     * 표본이 [RepOutliers.MIN_SAMPLES] 미만이면 편차가 비고, 이상치 판정도 하지 않는다 —
+     * 판단 근거가 없을 때 배제하는 것이 더 나쁘다.
+     */
+    private fun withDeviations(reps: List<CaptureRep>): List<CaptureRep> {
+        val deviations = RepOutliers.deviations(reps)
+        return reps.map { it.copy(deviation = deviations[it.repId]) }
+    }
 
     private fun loadEngine() {
         viewModelScope.launch {
