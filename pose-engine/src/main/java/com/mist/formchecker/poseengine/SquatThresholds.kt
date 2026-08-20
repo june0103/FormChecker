@@ -116,6 +116,32 @@ data class AngleDetectionThresholds(
 )
 
 /**
+ * 각도 스무딩 설정.
+ *
+ * 두 값 모두 **시간 단위**다. 프레임 단위로 두면 분석 fps가 변할 때 스무딩 강도와 창 폭이
+ * 함께 변한다. RTMPose 추론이 26~36ms로 변동해 실제 fps가 일정하지 않으므로 시간 기준이
+ * 필수다. 자세한 이유는 [AngleEma]·[MedianWindow] 주석 참고.
+ */
+data class SmoothingConfig(
+    /**
+     * 상태머신 입력용 EMA 시간상수(ms).
+     *
+     * 작을수록 민감하다. 너무 작으면 노이즈로 상태가 진동하고, 너무 크면 최저점 도달을
+     * 늦게 감지해 rep 종료가 밀린다.
+     */
+    val emaTimeConstantMs: Double = 120.0,
+
+    /**
+     * 특징 집계용 median 창의 시간 폭(ms).
+     *
+     * 최저점 탐색과 그 주변 값 축약에 쓴다. 데이터 측 보고서가 최저점 ±2 프레임(30fps
+     * 기준 약 133ms)을 권장했으므로 그와 맞춘 값이다. 다만 앱의 분석 fps가 더 낮을 수
+     * 있어 프레임이 아니라 시간으로 정의한다.
+     */
+    val medianWindowMs: Double = 133.0,
+)
+
+/**
  * [SquatFormAnalyzer] 전체 설정.
  *
  * 기본값은 잠정값이다. 데이터 측 확정값이 오면 호출부에서 교체해 주입한다.
@@ -123,5 +149,6 @@ data class AngleDetectionThresholds(
 data class SquatAnalyzerConfig(
     val form: FormThresholds = FormThresholds(),
     val angleDetection: AngleDetectionThresholds = AngleDetectionThresholds(),
+    val smoothing: SmoothingConfig = SmoothingConfig(),
     val minConfidence: Float = Pose.MIN_CONFIDENCE,
 )
