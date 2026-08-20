@@ -62,6 +62,13 @@ data class SquatForm(
     val cameraAngle: CameraAngle,
     val visibility: PoseVisibility,
     val kneeAngles: KneeAngles,
+    /**
+     * 어깨-힙-무릎 각도. 고관절 굴곡의 척도.
+     *
+     * 촬영 각도로 게이트하지 않는다 — rep 요약에 기록해 데이터 측이 domain gap을 검증할
+     * 재료로 써야 하므로, 판정에 쓰지 않는 각도라도 값 자체는 남긴다.
+     */
+    val hipAngles: BilateralAngles,
     val depth: DepthLevel?,
     val torsoLeanDegrees: Float?,
     val kneeAlignment: KneeAlignment?,

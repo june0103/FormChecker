@@ -2,6 +2,7 @@ package com.mist.formchecker.ui.screen.workout
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.mist.formchecker.poseengine.Pose
@@ -21,6 +22,14 @@ data class PoseResult(
     val pose: Pose,
     val frameWidth: Int,
     val frameHeight: Int,
+    /**
+     * 이 프레임을 분석한 시각(ms).
+     *
+     * rep 상태머신의 시간 조건(최소 유지 시간·최소 지속시간)과 각속도 계산에 쓴다.
+     * 단조 증가 시계(`SystemClock.elapsedRealtime`)를 쓴다 — 벽시계는 시간대 변경이나
+     * NTP 보정으로 뒤로 갈 수 있어 시간 차이 계산이 음수가 될 수 있다.
+     */
+    val timestampMs: Long,
 ) {
     /**
      * 정규화 좌표계는 x축과 y축의 "1"이 서로 다른 픽셀 길이를 뜻하는 비등방 좌표계다.
@@ -77,6 +86,7 @@ class PoseAnalyzer(
                     pose = pose,
                     frameWidth = upright.width,
                     frameHeight = upright.height,
+                    timestampMs = SystemClock.elapsedRealtime(),
                 ),
             )
         }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,8 @@ import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.PoseVisibility
+import com.mist.formchecker.poseengine.RepEvent
+import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.SquatForm
 import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
@@ -43,8 +46,14 @@ import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackInfoContainer
 import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.FeedbackWarningContainer
+import com.mist.formchecker.ui.theme.LimeGreen
 import com.mist.formchecker.ui.theme.Radius
+import com.mist.formchecker.ui.theme.RepCounterDisplay
+import com.mist.formchecker.ui.theme.RepCounterDisplayCompact
+import com.mist.formchecker.ui.theme.RepCounterLabel
+import com.mist.formchecker.ui.theme.Scrim
 import com.mist.formchecker.ui.theme.Spacing
+import com.mist.formchecker.ui.theme.TextPrimary
 import com.mist.formchecker.ui.theme.TouchTarget
 
 /**
@@ -138,6 +147,11 @@ private fun WorkoutContent(
                         mirrored = state.isFrontCamera,
                         modifier = Modifier.fillMaxSize(),
                     )
+                    RepCounterHud(
+                        state = state,
+                        onReset = viewModel::resetRepCount,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
@@ -193,6 +207,90 @@ private fun WorkoutContent(
             }
         }
     }
+}
+
+/**
+ * 카메라 프리뷰 위에 얹는 rep 카운터.
+ *
+ * 설계문서 172행이 "상단에 rep count/목표"를 지정한다. 레이아웃 높이를 차지하지 않아
+ * 카메라 영역을 잃지 않는 것도 이유다.
+ *
+ * ## 스크림이 필요한 이유
+ * 카메라 영상 위 텍스트라 배경 밝기를 통제할 수 없다. 밝은 배경에서 흰 숫자는 읽히지
+ * 않으므로 상단에 어두운 그라데이션을 깐다. 디자인을 Phase 6으로 미뤘지만 이 대비
+ * 처리는 시각 완성도가 아니라 **가독성 기능**이라 지금 넣는다.
+ */
+@Composable
+private fun RepCounterHud(
+    state: WorkoutUiState,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Scrim.copy(alpha = 0.75f), Color.Transparent),
+                ),
+            )
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = state.repCount.toString(),
+                // 세 자리(100+)는 좁은 화면에서 잘리므로 축약 스타일로 바꾼다
+                // (디자인시스템 Type.kt 주석).
+                style = if (state.repCount >= 100) RepCounterDisplayCompact else RepCounterDisplay,
+                color = LimeGreen,
+            )
+            Text(
+                text = "회",
+                style = RepCounterLabel,
+                color = TextPrimary,
+                modifier = Modifier.padding(start = Spacing.xs, bottom = Spacing.sm),
+            )
+        }
+
+        // 상태와 중단 사유는 개발 중 동작 확인용이다. rep이 왜 세어지지 않았는지
+        // 눈으로 알 수 있어야 임계값을 조정할 수 있다.
+        Text(
+            text = buildString {
+                append(state.repState.label())
+                state.lastRepDepth?.let { append("   직전 깊이 ").append(it.label()) }
+                state.lastAbortReason?.let { append("   중단 ").append(it.label()) }
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = TextPrimary,
+        )
+
+        if (state.repCount > 0) {
+            Text(
+                text = "초기화",
+                style = MaterialTheme.typography.labelSmall,
+                color = FeedbackInfo,
+                modifier = Modifier
+                    .clickable(onClick = onReset)
+                    .padding(Spacing.xs),
+            )
+        }
+    }
+}
+
+private fun RepState.label(): String = when (this) {
+    RepState.IDLE -> "대기"
+    RepState.STANDING -> "선 자세"
+    RepState.DESCENDING -> "하강"
+    RepState.BOTTOM -> "최저점"
+    RepState.ASCENDING -> "상승"
+}
+
+private fun RepEvent.Aborted.Reason.label(): String = when (this) {
+    RepEvent.Aborted.Reason.NOT_DEEP_ENOUGH -> "깊이 미달"
+    RepEvent.Aborted.Reason.TOO_FAST -> "너무 빠름"
+    RepEvent.Aborted.Reason.TIMEOUT -> "시간 초과"
+    RepEvent.Aborted.Reason.POSE_LOST -> "자세 놓침"
 }
 
 /**

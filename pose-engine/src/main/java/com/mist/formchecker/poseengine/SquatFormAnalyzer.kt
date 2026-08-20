@@ -53,6 +53,7 @@ class SquatFormAnalyzer(
             cameraAngle = cameraAngle,
             visibility = visibility(pose),
             kneeAngles = knees,
+            hipAngles = JointAngles.hips(pose, frameAspectRatio, minConfidence),
             depth = depth,
             torsoLeanDegrees = torsoLean,
             kneeAlignment = alignment,

@@ -5,18 +5,18 @@ import kotlin.math.acos
 import kotlin.math.sqrt
 
 /**
- * 한 프레임에서 뽑은 무릎 각도.
+ * 한 프레임에서 뽑은 좌우 관절 각도.
  *
  * 좌/우를 따로 들고 있는 이유는 두 가지다.
  * 1. 측면 촬영에서는 먼 쪽 다리가 가려져 confidence가 낮게 나온다. 신뢰 가능한 쪽만 쓴다.
  * 2. 좌우 차이 자체가 자세 비대칭 판정의 재료가 된다 (설계문서 3.4절 확장 여지).
  */
-data class KneeAngles(
+data class BilateralAngles(
     val left: Float?,
     val right: Float?,
 ) {
     /**
-     * rep 카운팅에 쓸 대표 각도.
+     * 대표 각도.
      *
      * 둘 다 신뢰 가능하면 평균, 한쪽만이면 그 값, 둘 다 없으면 null이다.
      * 평균을 쓰는 이유: 정면 촬영에서 한쪽만 쓰면 좌우 흔들림이 그대로 노이즈가 된다.
@@ -30,6 +30,9 @@ data class KneeAngles(
     val asymmetry: Float? =
         if (left != null && right != null) abs(left - right) else null
 }
+
+/** 무릎 각도. [BilateralAngles]의 별칭으로, 호출부에서 어느 관절인지 읽히게 한다. */
+typealias KneeAngles = BilateralAngles
 
 /**
  * 키포인트에서 관절 각도를 계산한다.
@@ -54,6 +57,31 @@ object JointAngles {
      *   일반적인 4:3·16:9 카메라에서는 각도가 틀어진다.
      * @param minConfidence 이 값 미만인 키포인트가 하나라도 있으면 해당 다리는 null.
      */
+    /**
+     * 어깨-힙-무릎 각도를 좌우 각각 계산한다. 고관절 굴곡의 척도.
+     *
+     * 설계문서 3.2절에는 없지만 필요하다. AI Hub 라벨의 "고관절오류"가 이 각도로 정상과
+     * 구분되고(3D 기준 정상 57.7도 vs 고관절오류 97.2도), 데이터 측 보고서의 `hipb_*`
+     * 특징군도 이 각도를 최저점 탐색 기준으로 쓴다.
+     *
+     * 측면 촬영에서만 의미가 있다 — 정면에서는 상체의 앞뒤 굴곡이 화면상 거의 변화를
+     * 만들지 않는다.
+     */
+    fun hips(
+        pose: Pose,
+        frameAspectRatio: Float,
+        minConfidence: Float = Pose.MIN_CONFIDENCE,
+    ): BilateralAngles = BilateralAngles(
+        left = angleAt(
+            pose, KeypointType.LEFT_SHOULDER, KeypointType.LEFT_HIP, KeypointType.LEFT_KNEE,
+            frameAspectRatio, minConfidence,
+        ),
+        right = angleAt(
+            pose, KeypointType.RIGHT_SHOULDER, KeypointType.RIGHT_HIP, KeypointType.RIGHT_KNEE,
+            frameAspectRatio, minConfidence,
+        ),
+    )
+
     fun knees(
         pose: Pose,
         frameAspectRatio: Float,
