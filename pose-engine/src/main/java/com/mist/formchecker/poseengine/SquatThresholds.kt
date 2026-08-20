@@ -116,6 +116,89 @@ data class AngleDetectionThresholds(
 )
 
 /**
+ * rep 카운팅 임계값. **[FormThresholds]와 서로 참조하지 않는다.**
+ *
+ * ## 왜 자세 임계값과 분리하는가
+ * 설계문서 3.2절은 BOTTOM 진입을 `무릎각 < 100°`로, 깊이 부족 경고를 `BOTTOM 각도 ≥ 120°`로
+ * 정의했다. **두 조건은 동시에 참이 될 수 없어** 깊이 부족 경고가 영원히 발생하지 않는다.
+ * 하나의 임계값 집합으로 카운팅과 자세를 함께 다루면 이런 모순이 생긴다.
+ *
+ * 분리하면 의도한 동작이 자연스럽게 나온다.
+ * ```
+ * 얕은 스쿼트: repBottomAngle 통과 → rep으로 센다
+ *              validDepthAngle 미달 → "깊이 부족" 경고를 함께 표시
+ * ```
+ * 얕은 rep을 아예 세지 않으면 사용자에게는 카운터가 멈춘 것처럼 보인다. 세되 경고하는
+ * 것이 맞다.
+ *
+ * 상태머신은 이 타입만 안다. 깊이 유효성은 rep이 끝난 뒤 기록된 최저 각도를
+ * [FormThresholds]로 따로 판정한다.
+ */
+data class CountingThresholds(
+    /**
+     * 이 각도 이상이면 선 것으로 본다. STANDING 진입 조건.
+     *
+     * [standingExitAngle]보다 커서 히스테리시스를 만든다 — 두 값이 같으면 경계에서
+     * 상태가 진동한다.
+     */
+    val standingEnterAngle: Float = 155f,
+
+    /** 이 각도 아래로 내려가면 하강 시작으로 본다. STANDING 이탈 조건. */
+    val standingExitAngle: Float = 145f,
+
+    /**
+     * 이 각도 아래로 내려가야 rep 시도로 인정한다.
+     *
+     * **자세 판정용 [FormThresholds.deepAngle]보다 관대해야 한다.** 얕은 스쿼트도 동작
+     * 자체는 카운트하기 위함이다.
+     */
+    val repBottomAngle: Float = 130f,
+
+    /** 상태 전이를 확정하는 데 필요한 연속 유지 시간(ms). 짧은 튐으로 전이하지 않게 한다. */
+    val minHoldMs: Long = 100L,
+
+    /** 이보다 짧으면 rep으로 세지 않는다. 반동·흔들림으로 인한 오탐 방지. */
+    val minRepDurationMs: Long = 700L,
+
+    /** 이보다 길어지면 rep을 포기한다(중간에 멈춰 서 있는 경우). */
+    val maxRepDurationMs: Long = 15_000L,
+
+    /**
+     * 각도를 얻지 못한 프레임이 이 시간 이상 연속되면 rep을 포기한다.
+     *
+     * 가림 한두 프레임으로 rep이 끊기면 실사용이 불가능하므로 여유를 둔다.
+     */
+    val maxMissingMs: Long = 1_000L,
+) {
+    init {
+        require(standingExitAngle < standingEnterAngle) {
+            "히스테리시스가 성립하지 않습니다: exit($standingExitAngle) < enter($standingEnterAngle) 여야 합니다"
+        }
+        require(repBottomAngle < standingExitAngle) {
+            "rep 최저 임계값($repBottomAngle)이 하강 임계값($standingExitAngle)보다 작아야 합니다"
+        }
+    }
+
+    companion object {
+        /**
+         * 각 값의 출처. 데이터 측 확정값이 오면 [ThresholdOrigin.DATA_DERIVED]로 바뀐다.
+         *
+         * 설계문서 3.2절의 160°/100°를 그대로 쓰지 않은 이유: 그 값들은 카운팅과 자세를
+         * 구분하지 않은 상태의 숫자다. 카운팅은 더 관대해야 하므로 잠정적으로 낮췄다.
+         */
+        val ORIGINS: Map<String, ThresholdOrigin> = mapOf(
+            "standingEnterAngle" to ThresholdOrigin.PROVISIONAL,
+            "standingExitAngle" to ThresholdOrigin.PROVISIONAL,
+            "repBottomAngle" to ThresholdOrigin.PROVISIONAL,
+            "minHoldMs" to ThresholdOrigin.PROVISIONAL,
+            "minRepDurationMs" to ThresholdOrigin.PROVISIONAL,
+            "maxRepDurationMs" to ThresholdOrigin.PROVISIONAL,
+            "maxMissingMs" to ThresholdOrigin.PROVISIONAL,
+        )
+    }
+}
+
+/**
  * 각도 스무딩 설정.
  *
  * 두 값 모두 **시간 단위**다. 프레임 단위로 두면 분석 fps가 변할 때 스무딩 강도와 창 폭이
