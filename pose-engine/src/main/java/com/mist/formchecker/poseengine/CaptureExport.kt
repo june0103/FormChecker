@@ -32,7 +32,7 @@ object CaptureExport {
         info("view") { it.view.name }
         info("active_side") { it.view.activeSide?.name }
         info("exercise_profile") { it.exerciseProfile }
-        info("footwear") { it.footwear }
+        info("footwear") { it.footwear.name }
         info("camera_height_cm") { it.cameraHeightCm }
         info("camera_distance_cm") { it.cameraDistanceCm }
         info("device_model") { it.deviceModel }

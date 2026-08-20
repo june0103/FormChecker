@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,13 +33,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CaptureRep
 import com.mist.formchecker.poseengine.CaptureView
+import com.mist.formchecker.poseengine.Footwear
 import com.mist.formchecker.poseengine.CaptureIntent
 import com.mist.formchecker.poseengine.RepOutliers
 import com.mist.formchecker.poseengine.StandingCalibration
@@ -171,23 +170,12 @@ private fun SetupStage(
             CaptureIntent.entries.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     row.forEach { intent ->
-                        val selected = intent == state.intent
-                        val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
-                        if (selected) {
-                            Button(
-                                onClick = { viewModel.selectIntent(intent) },
-                                modifier = buttonModifier,
-                            ) {
-                                Text(intent.displayName, style = MaterialTheme.typography.labelSmall)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { viewModel.selectIntent(intent) },
-                                modifier = buttonModifier,
-                            ) {
-                                Text(intent.displayName, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
+                        ChoiceButton(
+                            label = intent.displayName,
+                            selected = intent == state.intent,
+                            onClick = { viewModel.selectIntent(intent) },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                     // 마지막 줄이 3개 미만이면 남는 칸을 추가해 버튼 폭을 맞춘다.
                     repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -206,36 +194,22 @@ private fun SetupStage(
         HorizontalDivider()
         Text("촬영 조건", style = MaterialTheme.typography.titleMedium)
         Text(
-            "임계값이 살아남아야 하는 대상은 rep의 다양성이 아니라 촬영 조건의 " +
-                "다양성입니다. 조건을 기록해 두면 어떤 조건에서 값이 흔들리는지 나중에 볼 수 있습니다.",
+            "신발만 기록합니다. 발 길이와 뒤꿈치 위치를 바꿔 거리 특징의 분모와 뒤꿈치 " +
+                "들림 판정에 직접 영향을 주기 때문입니다. 카메라 높이·거리는 줄자 없이 적으면 " +
+                "기록만 그럴듯하고 근거가 없어 입력받지 않습니다.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            OutlinedTextField(
-                value = state.cameraHeightCm,
-                onValueChange = viewModel::updateCameraHeight,
-                label = { Text("카메라 높이 cm") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedTextField(
-                value = state.cameraDistanceCm,
-                onValueChange = viewModel::updateCameraDistance,
-                label = { Text("거리 cm") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Footwear.entries.forEach { footwear ->
+                ChoiceButton(
+                    label = footwear.displayName,
+                    selected = footwear == state.footwear,
+                    onClick = { viewModel.selectFootwear(footwear) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
-        OutlinedTextField(
-            value = state.footwear,
-            onValueChange = viewModel::updateFootwear,
-            label = { Text("신발 (맨발/운동화 등)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
 
         state.engineError?.let {
             Text(
@@ -617,31 +591,53 @@ private fun RepReviewRow(
         // 판정을 따를 필요가 없으므로 버튼이 있으면 "판정하라"는 잘못된 신호를 준다.
         if (flagged || rep.manualInclude != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
-                if (rep.manualInclude == true) {
-                    Button(onClick = { onInclude(true) }, modifier = buttonModifier) {
-                        Text("포함", style = MaterialTheme.typography.labelSmall)
-                    }
-                } else {
-                    OutlinedButton(onClick = { onInclude(true) }, modifier = buttonModifier) {
-                        Text("포함", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                if (rep.manualInclude == false) {
-                    Button(onClick = { onInclude(false) }, modifier = buttonModifier) {
-                        Text("제외", style = MaterialTheme.typography.labelSmall)
-                    }
-                } else {
-                    OutlinedButton(onClick = { onInclude(false) }, modifier = buttonModifier) {
-                        Text("제외", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+                ChoiceButton(
+                    label = "포함",
+                    selected = rep.manualInclude == true,
+                    onClick = { onInclude(true) },
+                    modifier = Modifier.weight(1f),
+                )
+                ChoiceButton(
+                    label = "제외",
+                    selected = rep.manualInclude == false,
+                    onClick = { onInclude(false) },
+                    modifier = Modifier.weight(1f),
+                )
+                // "자동"은 토글이 아니라 되돌리기다. 사람이 손댄 rep에만 나타난다.
                 if (rep.manualInclude != null) {
-                    OutlinedButton(onClick = onClearDecision, modifier = buttonModifier) {
+                    OutlinedButton(
+                        onClick = onClearDecision,
+                        modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+                    ) {
                         Text("자동", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 선택 상태에 따라 채운 버튼과 외곽선 버튼을 바꿔 그린다.
+ *
+ * 의도·신발·검토 세 곳이 같은 토글이다. 각자 `if (selected) Button else OutlinedButton`을
+ * 적으면 스타일이 조용히 갈라진다 — 같은 뜻의 UI는 한 곳에서 그린다.
+ */
+@Composable
+private fun ChoiceButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sized = modifier.height(TouchTarget.minSize)
+    if (selected) {
+        Button(onClick = onClick, modifier = sized) {
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = sized) {
+            Text(label, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

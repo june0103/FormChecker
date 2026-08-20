@@ -55,10 +55,16 @@ data class CaptureSessionInfo(
     /** 운동 프로필. 설계문서 스코프상 맨몸 스쿼트 1종만 쓴다. */
     val exerciseProfile: String = DEFAULT_PROFILE,
     /** 신발 상태. 발 길이·뒤꿈치 추정에 영향을 준다. */
-    val footwear: String = "",
-    /** 카메라 높이(cm). 대략값. 골반 높이 권장(문서 §5.1). */
+    val footwear: Footwear = Footwear.BAREFOOT,
+    /**
+     * 카메라 높이(cm). 대략값. 골반 높이 권장(문서 §5.1).
+     *
+     * 앱에서는 더 입력받지 않는다 — 줄자 없이 적은 값은 기록만 그럴듯하고 근거가 없다.
+     * 컬럼은 남긴다. 이미 찍은 세션 파일과 스키마가 어긋나면 조인이 깨지고, 삼각대를
+     * 고정해 실제로 재는 촬영을 하게 되면 그때 다시 채우면 된다.
+     */
     val cameraHeightCm: Int? = null,
-    /** 카메라 거리(cm). 대략값. */
+    /** 카메라 거리(cm). [cameraHeightCm]과 같은 이유로 앱에서 입력받지 않는다. */
     val cameraDistanceCm: Int? = null,
     val deviceModel: String = "",
     val poseModelName: String = "",
@@ -75,6 +81,18 @@ data class CaptureSessionInfo(
     companion object {
         const val DEFAULT_PROFILE = "BODYWEIGHT_PARALLEL"
     }
+}
+
+/**
+ * 신발 상태.
+ *
+ * 발 길이와 뒤꿈치 y좌표를 바꾸므로 거리 특징의 분모(`footLength`)와 뒤꿈치 들림 판정에
+ * 직접 영향을 준다. 자유 입력이 아니라 두 값으로 고정했다 — "운동화", "운동화(나이키)",
+ * "슈즈"가 섞이면 나중에 조건별로 나눠 볼 수 없고, 그러려고 기록하는 값이다.
+ */
+enum class Footwear(val displayName: String) {
+    BAREFOOT("맨발"),
+    SHOES("운동화"),
 }
 
 /**

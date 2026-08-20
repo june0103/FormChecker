@@ -12,6 +12,7 @@ import com.mist.formchecker.poseengine.CaptureRep
 import com.mist.formchecker.poseengine.CaptureSessionInfo
 import com.mist.formchecker.poseengine.CaptureSessionRecord
 import com.mist.formchecker.poseengine.CaptureView
+import com.mist.formchecker.poseengine.Footwear
 import com.mist.formchecker.poseengine.MedianWindow
 import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngineHandle
@@ -64,9 +65,8 @@ data class CaptureUiState(
      * ([CaptureIntent] 참고). 의도만 받고 일관성은 데이터로 판단한다.
      */
     val intent: CaptureIntent = CaptureIntent.NORMAL,
-    val footwear: String = "",
-    val cameraHeightCm: String = "",
-    val cameraDistanceCm: String = "",
+    /** 신발 상태. 촬영 조건으로 기록하는 유일한 항목이다. */
+    val footwear: Footwear = Footwear.BAREFOOT,
     // ── 엔진 ────────────────────────────────────────────────
     val engineReady: Boolean = false,
     val engineError: String? = null,
@@ -158,9 +158,7 @@ class CaptureViewModel @Inject constructor(
 
     fun updatePersonId(value: String) = _uiState.update { it.copy(personId = value) }
     fun selectIntent(intent: CaptureIntent) = _uiState.update { it.copy(intent = intent) }
-    fun updateFootwear(value: String) = _uiState.update { it.copy(footwear = value) }
-    fun updateCameraHeight(value: String) = _uiState.update { it.copy(cameraHeightCm = value) }
-    fun updateCameraDistance(value: String) = _uiState.update { it.copy(cameraDistanceCm = value) }
+    fun selectFootwear(value: Footwear) = _uiState.update { it.copy(footwear = value) }
 
     fun selectView(view: CaptureView) {
         // 촬영 각도가 바뀌면 활성 다리와 판정 항목이 통째로 갈린다. 캘리브레이션도
@@ -214,8 +212,6 @@ class CaptureViewModel @Inject constructor(
             measurementGroupId = "${state.personId}_${dayStamp()}",
             view = state.view,
             footwear = state.footwear,
-            cameraHeightCm = state.cameraHeightCm.toIntOrNull(),
-            cameraDistanceCm = state.cameraDistanceCm.toIntOrNull(),
             deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
             poseModelName = state.modelName,
             frameWidth = result.frameWidth,
@@ -292,8 +288,6 @@ class CaptureViewModel @Inject constructor(
                 view = it.view,
                 intent = it.intent,
                 footwear = it.footwear,
-                cameraHeightCm = it.cameraHeightCm,
-                cameraDistanceCm = it.cameraDistanceCm,
                 engineReady = it.engineReady,
                 modelName = it.modelName,
                 lensFacing = it.lensFacing,
