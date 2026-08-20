@@ -225,6 +225,9 @@ class CaptureRecorder(
             }
         }
 
+        // 프레임 간격. 발열 스로틀링으로 세션 안에서 fps가 떨어지므로 rep마다 재야 한다.
+        val intervals = repFrames.zipWithNext { a, b -> b.timestampMs - a.timestampMs }
+
         val evaluable = repFrames.count { it.features.minConfidence >= EVALUABLE_CONFIDENCE }
             .toFloat() / repFrames.size
         val validRatio = repFrames.count { it.features.representativeKneeFlexion != null }
@@ -266,6 +269,15 @@ class CaptureRecorder(
             validFrameRatio = validRatio,
             frameCount = repFrames.size,
             intent = intent,
+            frameIntervalMs = intervals.takeIf { it.isNotEmpty() }?.let { median(it) },
+            maxFrameIntervalMs = intervals.maxOrNull(),
+            // BOTTOM 라벨은 바로 위에서 실제 최저점 기준으로 다시 붙였으므로 그걸 쓴다.
+            // 별도 임계값을 두면 같은 것을 두 기준으로 재게 된다.
+            bottomDwellMs = repFrames.filter { it.phase == CapturePhase.BOTTOM }
+                .let { bottom ->
+                    if (bottom.isEmpty()) null
+                    else bottom.last().timestampMs - bottom.first().timestampMs
+                },
         )
         completedReps += rep
         // 진행도를 덮어쓴 뒤에 불변 스냅샷을 만든다. 이 시점 이전에 내보내면 진행도가
@@ -335,6 +347,16 @@ class CaptureRecorder(
             if (standing != null && flexion <= standing + STANDING_TOLERANCE_DEGREES) break
         }
         return index
+    }
+
+    private fun median(values: List<Long>): Float {
+        val sorted = values.sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 1) {
+            sorted[middle].toFloat()
+        } else {
+            (sorted[middle - 1] + sorted[middle]) / 2f
+        }
     }
 
     /** 카메라·모델 전환처럼 시계열이 끊기면 호출한다. */
