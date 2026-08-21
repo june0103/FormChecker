@@ -85,6 +85,13 @@ data class CaptureUiState(
     val recordedFrames: Int = 0,
     val droppedFrames: Int = 0,
     val reps: List<CaptureRep> = emptyList(),
+    /**
+     * 기기에 저장된 세션 목록. 최신 순.
+     *
+     * 촬영은 실패하고, 실패한 세션은 지워야 한다 — 남으면 공유할 때 전부 딸려 나가고 다음
+     * 촬영 때 폴더명으로 구분해야 한다.
+     */
+    val storedSessions: List<CaptureLibrary.StoredSession> = emptyList(),
 ) {
     val isFrontCamera: Boolean get() = lensFacing == CameraSelector.LENS_FACING_FRONT
 
@@ -142,6 +149,7 @@ class CaptureViewModel @Inject constructor(
 
     init {
         loadEngine()
+        refreshStoredSessions()
         viewModelScope.launch {
             logSession.writtenFrames.collect { count ->
                 _uiState.update { it.copy(recordedFrames = count) }
@@ -282,6 +290,9 @@ class CaptureViewModel @Inject constructor(
     fun finishSession() {
         logSession.logReps(_uiState.value.reps)
         logSession.finish()
+        // 방금 찍은 세션이 목록에 나타나야 한다. 파일 쓰기가 IO 스레드에서 끝난 뒤라야
+        // 크기와 rep 수가 맞으므로 목록 갱신도 그쪽에서 한다.
+        refreshStoredSessions()
         recorder = null
         sessionInfo = null
         _uiState.update {
@@ -295,6 +306,39 @@ class CaptureViewModel @Inject constructor(
                 modelName = it.modelName,
                 lensFacing = it.lensFacing,
             )
+        }
+    }
+
+    // ── 저장된 세션 ─────────────────────────────────────────
+
+    /**
+     * 저장된 세션 목록을 다시 읽는다.
+     *
+     * IO 스레드에서 읽는다 — 세션마다 `session.csv`와 `reps.csv`를 열므로 목록이 길어지면
+     * 메인스레드에서는 화면이 멈춘다.
+     */
+    fun refreshStoredSessions() {
+        viewModelScope.launch {
+            val sessions = withContext(Dispatchers.IO) {
+                CaptureLibrary.list(getApplication())
+            }
+            _uiState.update { it.copy(storedSessions = sessions) }
+        }
+    }
+
+    /**
+     * 세션을 지운다. **되돌릴 수 없으므로 화면에서 확인을 받은 뒤 호출할 것.**
+     *
+     * 지운 뒤 목록을 다시 읽는다 — 지우기가 실패했을 때(권한·파일 잠김) 목록에 그대로
+     * 남아 있는 것이 사용자에게 정확한 상태다.
+     */
+    fun deleteStoredSession(session: CaptureLibrary.StoredSession) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { CaptureLibrary.delete(session) }
+            val sessions = withContext(Dispatchers.IO) {
+                CaptureLibrary.list(getApplication())
+            }
+            _uiState.update { it.copy(storedSessions = sessions) }
         }
     }
 

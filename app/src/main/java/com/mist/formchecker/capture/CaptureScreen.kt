@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -210,6 +211,12 @@ private fun SetupStage(
                 )
             }
         }
+
+        HorizontalDivider()
+        StoredSessionSection(
+            sessions = state.storedSessions,
+            onDelete = viewModel::deleteStoredSession,
+        )
 
         state.engineError?.let {
             Text(
@@ -613,6 +620,142 @@ private fun RepReviewRow(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 저장된 세션 목록.
+ *
+ * ## 왜 필요한가
+ * 촬영은 실패한다 — 자세가 엉망이었거나, 사람이 프레임을 벗어났거나, `person_id`를 바꾸는
+ * 것을 잊었거나. 프레임이 0인 세션은 자동으로 지워지지만 그건 화면만 열었다 닫은 경우고,
+ * **찍긴 찍었는데 버려야 하는 세션은 기기에 남는다.** 남으면 공유할 때 전부 딸려 나가고,
+ * 다음 촬영 때 폴더명으로 구분해야 한다.
+ *
+ * ## 왜 여기(설정 단계)인가
+ * 지울지 정하는 시점은 **다음 세션을 찍기 직전**이다. 검토 화면에 두면 방금 찍은 것만
+ * 보이고, 별도 화면으로 빼면 촬영 흐름에서 한 번 더 벗어난다.
+ */
+@Composable
+private fun StoredSessionSection(
+    sessions: List<CaptureLibrary.StoredSession>,
+    onDelete: (CaptureLibrary.StoredSession) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var pendingDelete by remember { mutableStateOf<CaptureLibrary.StoredSession?>(null) }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text("저장된 세션", style = MaterialTheme.typography.titleMedium)
+        if (sessions.isEmpty()) {
+            Text(
+                "아직 없습니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+
+        val totalMb = sessions.sumOf { it.bytes } / 1_048_576.0
+        Text(
+            "${sessions.size}개 · ${"%.1f".format(totalMb)}MB · " +
+                "포함 rep ${sessions.sumOf { it.includedReps }}개",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        sessions.forEach { session ->
+            StoredSessionRow(
+                session = session,
+                onShare = {
+                    CaptureShare.intentFor(context, session)?.let(context::startActivity)
+                },
+                onDelete = { pendingDelete = session },
+            )
+        }
+    }
+
+    // 지우기는 되돌릴 수 없으므로 확인을 받는다. 촬영 데이터는 다시 만들려면 사람을 다시
+    // 모아야 하는 종류의 파일이다.
+    val target = pendingDelete
+    if (target != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("이 세션을 지울까요?") },
+            text = {
+                Text(
+                    buildString {
+                        appendLine(target.label)
+                        appendLine(target.name)
+                        appendLine("rep ${target.reps}개 · 포함 ${target.includedReps}개")
+                        appendLine()
+                        append("되돌릴 수 없습니다.")
+                    },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDelete(target)
+                        pendingDelete = null
+                    },
+                ) { Text("지우기") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingDelete = null }) { Text("취소") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun StoredSessionRow(
+    session: CaptureLibrary.StoredSession,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    // 포함 rep이 0이면 찍었지만 쓸 것이 없는 세션이다. 지울 후보라는 것을 색으로 알린다.
+    val useless = session.includedReps == 0
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Text(
+            session.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (useless) TextMuted else LimeGreen,
+        )
+        Text(
+            buildString {
+                append("rep ${session.reps}개 · 포함 ${session.includedReps}개")
+                append(" · ${"%.1f".format(session.bytes / 1_048_576.0)}MB")
+                if (session.capturedAt.isNotEmpty()) {
+                    // ISO-8601의 날짜·시각만 남긴다. 초 단위는 목록에서 의미가 없다.
+                    append(" · ").append(session.capturedAt.take(16).replace('T', ' '))
+                }
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            OutlinedButton(
+                onClick = onShare,
+                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+            ) { Text("보내기", style = MaterialTheme.typography.labelSmall) }
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+            ) { Text("지우기", style = MaterialTheme.typography.labelSmall) }
         }
     }
 }

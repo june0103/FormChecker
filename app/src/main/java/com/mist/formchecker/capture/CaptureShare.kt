@@ -19,8 +19,22 @@ import java.io.File
 object CaptureShare {
 
     /** 저장된 모든 수집 파일을 공유하는 인텐트. 파일이 없으면 null. */
-    fun intentFor(context: Context): Intent? {
-        val files = CaptureWriter.storedFiles(context)
+    fun intentFor(context: Context): Intent? =
+        intentFor(context, CaptureWriter.storedFiles(context))
+
+    /**
+     * 세션 하나만 공유하는 인텐트.
+     *
+     * 전부 보내면 받는 쪽이 골라내야 하고, 세션이 쌓이면 첨부 용량도 커진다. 방금 찍은 것만
+     * 보내는 것이 촬영 중에는 더 흔한 경우다.
+     */
+    fun intentFor(context: Context, session: CaptureLibrary.StoredSession): Intent? =
+        intentFor(
+            context,
+            session.directory.listFiles()?.filter { it.isFile && it.length() > 0 }.orEmpty(),
+        )
+
+    private fun intentFor(context: Context, files: List<File>): Intent? {
         if (files.isEmpty()) return null
 
         val uris = files.mapNotNull { uriFor(context, it) }
