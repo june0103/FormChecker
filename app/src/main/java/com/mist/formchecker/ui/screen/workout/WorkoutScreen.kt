@@ -718,7 +718,7 @@ private fun Float.formatRatio(): String = "%.2f".format(this)
  */
 private fun DepthBasis.suffix(): String = when (this) {
     DepthBasis.HIP_HEIGHT -> "(높이)"
-    DepthBasis.KNEE_ANGLE -> "(각도)"
+    DepthBasis.SHIN_LENGTH -> "(정강이)"
 }
 
 private fun DepthLevel.label(): String = when (this) {

@@ -19,9 +19,15 @@ import org.junit.Test
  * 대퇴/정강이 비율 차이(0.6%)는 그 값의 각도 의존 노이즈(7%)보다 작았다 — 즉 16°는
  * 체형으로 설명되지 않고 실제 깊이 차이였다.
  *
- * ## 두 기준은 환산되지 않는다
- * 그래서 어느 쪽을 썼는지 결과에 남긴다. 남기지 않으면 기준선이 생기거나 사라질 때 판정이
- * 조용히 바뀌고, 리포트에서 원인을 찾을 수 없다.
+ * ## 각도 대체 경로를 정강이 정규화로 교체했다
+ * 기준선이 없을 때는 무릎 관절각으로 대체했었는데, 측면 실측 3세션에서 그 경로가 깊이비
+ * 경로와 45~67%만 일치했고 불일치가 한 방향이었다 — 최저점을 세 사람 모두 DEEP으로 읽어
+ * `SHALLOW_DEPTH`가 한 번도 발화하지 않았다.
+ *
+ * 정강이 정규화는 분자가 깊이비와 같고 분모만 다르므로 **패럴렐 경계가 부호로 정의되어
+ * 그대로 넘어온다.** 그래서 두 기준은 경계에서 일치해야 하고, 어긋나는 것은 허용폭뿐이다.
+ * 그래도 어느 쪽을 썼는지는 결과에 남긴다 — 남기지 않으면 기준선이 생기거나 사라질 때
+ * 허용폭이 조용히 바뀌고, 리포트에서 원인을 찾을 수 없다.
  */
 class DepthBasisTest {
 
@@ -82,24 +88,44 @@ class DepthBasisTest {
         )
     }
 
-    // ── 두 기준이 다른 답을 낸다 ────────────────────────────
+    // ── 두 기준이 경계에서 일치한다 ─────────────────────────
 
     /**
-     * 같은 깊이에서 두 기준이 갈리는 것을 고정한다. 이 테스트가 깨지면 두 경로가 우연히
-     * 같아진 것이고, 그러면 기준을 나눈 이유가 사라진다.
+     * 같은 깊이를 두 정규화가 같은 단계로 읽어야 한다. 분자가 같고 분모가 둘 다 양수이므로
+     * 부호가 항상 일치하고, 따라서 패럴렐 경계는 환산 오차 없이 넘어온다.
      *
-     * 실측 P001의 최저점: 무릎 굴곡 109.8°(내각 70.2°) → 각도 기준으로는 `deepAngle`(100°)
-     * 미만이라 DEEP. 깊이비 −0.026 → 높이 기준으로는 패럴렐에 겨우 닿은 PARALLEL.
-     * **같은 rep을 두 기준이 다르게 읽는다.**
+     * 환산 계수는 `legLength / tibiaLength`로 실측 3명이 2.075 / 2.018 / 2.100이었다.
+     * 여기 쓴 값들은 그 중앙 2.075로 환산한 짝이다.
      */
     @Test
-    fun `실측 rep을 두 기준이 다르게 판정한다`() {
-        val byAngle = thresholds.depthLevelOf(70.2f)
-        val byRatio = thresholds.depthLevelByRatio(-0.026f)
+    fun `두 정규화가 같은 깊이를 같은 단계로 읽는다`() {
+        val pairs = listOf(
+            // 깊이비, 정강이비 (= 깊이비 × 2.075)
+            -0.52f to -1.079f, // 선 자세
+            -0.10f to -0.208f, // 패럴렐에 못 미침
+            0f to 0f, // 대퇴 수평
+            0.08f to 0.166f, // 확실히 아래
+        )
+        for ((ratio, shin) in pairs) {
+            assertEquals(
+                "깊이비 $ratio / 정강이비 $shin 이 다른 단계로 읽혔다",
+                thresholds.depthLevelByRatio(ratio),
+                thresholds.depthLevelByShinDepth(shin),
+            )
+        }
+    }
 
-        assertEquals(DepthLevel.DEEP, byAngle)
-        assertEquals(DepthLevel.PARALLEL, byRatio)
-        assertNotEquals("두 기준은 환산되지 않는다", byAngle, byRatio)
+    /**
+     * 교체 전 경로가 놓쳤던 것을 고정한다.
+     *
+     * 실측 P001은 최저점 깊이비 중앙 −0.043으로 패럴렐에 닿지 못했는데, 관절각은 74.4°라
+     * 옛 `deepAngle`(100°) 미만이어서 DEEP으로 읽혔다 — 깊이 부족 경고가 나가지 않았다.
+     * 정강이 기준(−0.119)에서는 SHALLOW다.
+     */
+    @Test
+    fun `각도로는 놓쳤던 얕은 rep을 잡는다`() {
+        assertEquals(DepthLevel.SHALLOW, thresholds.depthLevelByShinDepth(-0.119f))
+        assertEquals(DepthLevel.SHALLOW, thresholds.depthLevelByRatio(-0.043f))
     }
 
     // ── 분석기가 기준을 고르고 남긴다 ──────────────────────
@@ -153,12 +179,39 @@ class DepthBasisTest {
         activeSide = Side.LEFT,
     )
 
+    /**
+     * 기준선 없이 계산한 특징. 정강이 정규화는 캘리브레이션이 필요 없으므로 이 경우에도
+     * 깊이가 나온다 — 기준선을 재기 전에도 깊이 피드백이 끊기지 않아야 한다.
+     */
+    private fun uncalibratedFeaturesAt(flexionDegrees: Float): FrameFeatures = FrameFeatures.from(
+        pose = sidePose(flexionDegrees),
+        aspectRatio = aspect,
+        calibration = null,
+        view = CaptureView.SIDE_LEFT,
+        activeSide = Side.LEFT,
+    )
+
     @Test
-    fun `기준선이 없으면 각도 기준을 쓴다`() {
+    fun `기준선이 없으면 정강이 기준을 쓴다`() {
+        val form = analyzer.analyze(
+            sidePose(90f), aspect, CameraAngle.SIDE, uncalibratedFeaturesAt(90f),
+        )
+
+        assertEquals(DepthBasis.SHIN_LENGTH, form.depthBasis)
+        assertNull("기준선이 없으면 깊이비도 없다", form.depthRatio)
+        assertNotNull("그래도 깊이는 판정한다", form.depth)
+    }
+
+    /**
+     * 특징이 아예 없으면 깊이를 판정하지 않는다. 무릎 각도로 대체하지 않는다 — 각도 경로가
+     * 최저점을 전부 DEEP으로 읽었으므로, 틀린 답보다 답이 없는 편이 낫다.
+     */
+    @Test
+    fun `특징이 없으면 깊이를 판정하지 않는다`() {
         val form = analyzer.analyze(sidePose(90f), aspect, CameraAngle.SIDE)
 
-        assertEquals(DepthBasis.KNEE_ANGLE, form.depthBasis)
-        assertNull("기준선이 없으면 깊이비도 없다", form.depthRatio)
+        assertNull(form.depth)
+        assertNull(form.depthBasis)
     }
 
     @Test
@@ -172,29 +225,37 @@ class DepthBasisTest {
     }
 
     /**
-     * 무릎 굴곡 90°는 대퇴가 수평이라는 뜻이므로 패럴렐이다. 각도 기준에서는 내각 90°가
-     * `deepAngle`(100°) 미만이라 DEEP이 된다 — 같은 자세를 다르게 읽는 실제 사례다.
+     * 무릎 굴곡 90°는 대퇴가 수평이라는 뜻이므로 패럴렐이다. **기준선이 있든 없든 같은
+     * 답이 나와야 한다** — 패럴렐 경계는 부호로 정의되므로 정규화 분모에 좌우되지 않는다.
+     *
+     * 이전 각도 대체 경로에서는 같은 자세가 DEEP으로 읽혔다.
      */
     @Test
-    fun `대퇴 수평은 높이 기준에서 패럴렐이다`() {
-        val normalized = analyzer.analyze(
+    fun `대퇴 수평은 두 기준 모두 패럴렐이다`() {
+        val calibrated = analyzer.analyze(
             sidePose(90f), aspect, CameraAngle.SIDE, featuresAt(90f),
         )
-        assertEquals(DepthLevel.PARALLEL, normalized.depth)
+        val uncalibrated = analyzer.analyze(
+            sidePose(90f), aspect, CameraAngle.SIDE, uncalibratedFeaturesAt(90f),
+        )
 
-        val angleBased = analyzer.analyze(sidePose(90f), aspect, CameraAngle.SIDE)
-        assertEquals(DepthLevel.DEEP, angleBased.depth)
+        assertEquals(DepthBasis.HIP_HEIGHT, calibrated.depthBasis)
+        assertEquals(DepthBasis.SHIN_LENGTH, uncalibrated.depthBasis)
+        assertEquals(DepthLevel.PARALLEL, calibrated.depth)
+        assertEquals(DepthLevel.PARALLEL, uncalibrated.depth)
     }
 
     @Test
     fun `선 자세는 두 기준 모두 서 있음으로 본다`() {
-        val normalized = analyzer.analyze(
+        val calibrated = analyzer.analyze(
             sidePose(0f), aspect, CameraAngle.SIDE, featuresAt(0f),
         )
-        val angleBased = analyzer.analyze(sidePose(0f), aspect, CameraAngle.SIDE)
+        val uncalibrated = analyzer.analyze(
+            sidePose(0f), aspect, CameraAngle.SIDE, uncalibratedFeaturesAt(0f),
+        )
 
-        assertEquals(DepthLevel.STANDING, normalized.depth)
-        assertEquals(DepthLevel.STANDING, angleBased.depth)
+        assertEquals(DepthLevel.STANDING, calibrated.depth)
+        assertEquals(DepthLevel.STANDING, uncalibrated.depth)
     }
 
     /**
