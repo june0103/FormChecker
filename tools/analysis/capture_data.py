@@ -35,6 +35,10 @@ SIDE_FEATURES = [
 
 FRONT_FEATURES = [
     "stance_width_ratio",
+    # 무릎 내측 이동. 정면 판정(valgus)의 재료이므로 빠지면 안 된다 — 처음 구현에서
+    # 누락돼 정상 범위 표에 무릎 항목이 통째로 없었다.
+    "left_medial_knee",
+    "right_medial_knee",
     "hip_shift_ratio",
     "pelvis_tilt",
     "shoulder_tilt",
@@ -197,3 +201,74 @@ def load_all(paths: list[str], frame_columns: list[str] | None = None) -> list[S
     # 사람 → 각도 → 촬영 시각 순. 같은 사람의 세션이 붙어 나와야 읽기 쉽다.
     sessions.sort(key=lambda s: (s.person, s.view, s.meta.get("captured_at", "")))
     return sessions
+
+
+# ── 극값 손실 ───────────────────────────────────────────────
+
+
+def representative_flexion(frame: dict[str, str]) -> float | None:
+    """대표 무릎 굴곡. 앱과 같은 규칙 — 둘 다 있으면 평균."""
+    left = num(frame, "left_knee_flexion")
+    right = num(frame, "right_knee_flexion")
+    if left is not None and right is not None:
+        return (left + right) / 2
+    return left if left is not None else right
+
+
+def peak_loss(values: list[float]) -> float | None:
+    """이산 샘플링 때문에 최댓값을 얼마나 낮게 봤는지.
+
+    ## 왜 이걸 재는가
+    "최저점 근처에 프레임이 몇 개 있나"로 위험을 재려 했지만 **그건 근거가 약했다.**
+    최저점은 매끄러운 전환점이므로 표본이 1~2개여도 오차는 곡률 × dt²로 작다. 실측
+    15세션에서 표본 수 기준으로는 13개가 위험으로 걸렸는데, 실제 손실은 중앙값 0.12°,
+    최악 세션 0.34°였다 — 패럴렐 허용폭(0.03)을 깊이비로 환산하면 1/30 수준이다.
+
+    그래서 대리 지표를 버리고 **놓친 양을 직접 계산한다.** 최댓값과 그 양옆 세 점으로
+    포물선을 지나게 해 꼭짓점을 구하고, 관측 최댓값과의 차를 손실로 본다.
+
+    @return 손실(관측 단위와 같음). 계산할 수 없으면 None.
+    """
+    if len(values) < 3:
+        return None
+    index = values.index(max(values))
+    if index == 0 or index == len(values) - 1:
+        # 최댓값이 끝점이면 꼭짓점이 구간 밖일 수 있어 보간이 무의미하다.
+        return None
+
+    before, peak, after = values[index - 1], values[index], values[index + 1]
+    curvature = before - 2 * peak + after
+    # 곡률이 0이면 세 점이 직선이다 — 전환점이 이 구간에 없다.
+    if abs(curvature) < 1e-9:
+        return None
+    offset = 0.5 * (before - after) / curvature
+    # 꼭짓점이 이웃 표본 밖이면 최댓값 위치를 잘못 잡은 것이다.
+    if abs(offset) > 1:
+        return None
+    vertex = peak - 0.25 * (before - after) * offset
+    return max(0.0, vertex - peak)
+
+
+def peak_losses(session: Session, feature: str | None = None) -> list[float]:
+    """rep마다 극값 손실을 낸다.
+
+    @param feature 컬럼 이름. None이면 대표 무릎 굴곡(도).
+    """
+    by_rep: dict[str, list[dict[str, str]]] = {}
+    for frame in session.frames:
+        rep_id = frame.get("rep_id")
+        if rep_id:
+            by_rep.setdefault(rep_id, []).append(frame)
+
+    losses = []
+    for frames in by_rep.values():
+        if feature is None:
+            values = [representative_flexion(f) for f in frames]
+        else:
+            values = [num(f, feature) for f in frames]
+        if any(v is None for v in values):
+            continue
+        loss = peak_loss([v for v in values if v is not None])
+        if loss is not None:
+            losses.append(loss)
+    return losses
