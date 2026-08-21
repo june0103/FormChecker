@@ -115,6 +115,10 @@ fun SessionSummaryScreen(
                     }
                 }
 
+                // 리포트를 성능 카드보다 먼저 둔다 — 사용자가 이 화면에서 찾는 것은
+                // 추론 지연이 아니라 "무엇을 고쳐야 하나"다.
+                state.report?.let { SessionReportCard(it) }
+
                 state.metrics?.let { PerformanceCard(it) }
 
                 Text(
@@ -122,6 +126,7 @@ fun SessionSummaryScreen(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 LazyColumn(
+                    // 카드가 늘어나도 rep 목록이 최소 높이를 갖도록 weight를 준다.
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {

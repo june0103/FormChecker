@@ -3,6 +3,8 @@ package com.mist.formchecker.data.local
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * 로컬 1차 저장소. 설계문서 4장 스키마 + `sync_status`.
@@ -21,7 +23,7 @@ import androidx.room.TypeConverters
         RepRecordEntity::class,
         PerformanceMetricsEntity::class,
     ],
-    version = 1,
+    version = 2,
 )
 @TypeConverters(Converters::class)
 abstract class FormCheckerDatabase : RoomDatabase() {
@@ -29,5 +31,23 @@ abstract class FormCheckerDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "formchecker.db"
+
+        /**
+         * 무릎 편차가 컸던 쪽을 rep에 남긴다. 세션 리포트가 "왼쪽 무릎을"이라고 쪽을
+         * 지목하는 데 쓴다.
+         *
+         * ## 왜 v1을 고치지 않고 마이그레이션을 쓰는가
+         * v1이 릴리스된 적은 없지만 디버그 빌드로 기기에 이미 깔려 있을 수 있다. 그 경우
+         * 스키마만 바꾸면 Room이 실행 시점에 예외를 던진다. 파괴적 마이그레이션으로
+         * 덮으면 예외는 사라지지만 **기록이 조용히 사라진다** — 이 DB가 1차 저장소이고
+         * 서버 사본이 아직 없다.
+         *
+         * 기존 행의 값은 null이다. 그때는 리포트가 쪽을 붙이지 않고 넘어간다.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE rep_records ADD COLUMN knee_toe_side TEXT")
+            }
+        }
     }
 }

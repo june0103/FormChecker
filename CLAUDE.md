@@ -13,13 +13,14 @@
 - **의존성**: Hilt, Room(KSP + `room.schemaLocation`), WorkManager, CameraX, kotlinx-serialization, Navigation(타입 안전 `@Serializable` 라우트) 전부 추가·배선됨
 - **모듈**: `:pose-engine` 분리 완료 (UI와 독립된 ML·판정 계층)
 - **추론 모델**: `app/src/main/assets/`에 두 개. **기본은 RTMPose-s Halpe26(26 keypoint)**이고 MoveNet Lightning(17 keypoint, COCO)은 비교용으로만 남아 있습니다. MoveNet에는 발 키포인트가 없어 뒤꿈치 들림·발끝 정렬을 아예 계산할 수 없습니다 — **새 판정을 추가할 때 MoveNet 경로를 가정하지 마세요.**
-- **화면**: Workout(카메라·판정·rep 카운팅·기준 자세 캘리브레이션), Capture(데이터 수집 모드, CSV/JSONL 내보내기 + 세션 목록·삭제) 둘 다 완성. Splash·Home 있음
+- **화면**: Workout(카메라·판정·rep 카운팅·기준 자세 캘리브레이션), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·동기화 대기 배지) 완성. Splash·Home 있음
+- **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
+- **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉을 때 왼쪽 무릎을 더 벌리세요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
 - **판정 5종**: 깊이 부족·상체 숙임(측면) / 무릎 valgus·flared·골반 쏠림(정면). `CameraAngle.supportedChecks`가 각도별로 켜고 끕니다
 - **분석 도구**: `tools/analysis/`에 `check_sessions.py`(촬영 당일 사용 가능 판정), `reference_range.py`, `variance_split.py`
 
 ### 비어 있는 것
 
-- **Room 엔티티가 0개** — 의존성만 있고 스키마가 없습니다. 운동을 끝내면 `SessionSummary(sessionId)`로 이동하지만 그 화면과 `HistoryScreen`이 플레이스홀더라 저장된 게 없습니다
 - **Supabase 의존성 없음** — 프로젝트도 미생성. 동기화는 Room 이후 작업입니다. URL/anon key는 `local.properties`로 관리하고 커밋 금지
 - **인증 없음** — `user_id`는 nullable로 두고 나중에 마이그레이션으로 채웁니다
 - **세트 개념 없음** — Workout은 rep을 연속으로 셉니다. `workout_sets` 테이블은 `rep_records`가 `set_id`를 참조하는 DDL을 지키려고 세션당 1행으로 둡니다
@@ -42,7 +43,7 @@
 
 ## 지금 해야 할 것
 
-1. **Room 스키마 + 세션 저장** (진행 중) — 설계문서 4장 개정판 DDL + `sync_status`. 운동 종료 시 세션·세트·rep·성능 저장, `SessionSummaryScreen`·`HistoryScreen` 플레이스홀더를 실제 화면으로. **점수 대신 사실을 저장합니다** (`form_score`는 가중치 근거가 없어 null, `checked_count`/`warned_count`로 대체 — 설계문서 4.1절)
+1. **Supabase + WorkManager 동기화** — Room이 1차 저장소로 동작하고 있고 모든 행이 `sync_status = PENDING`으로 쌓입니다. URL/anon key는 `local.properties`로 관리하고 커밋 금지
 2. **의도적 오류 세션 촬영** — 확정된 임계값 전부가 "오류를 잡는가" 미검증입니다. 측면 `TRUNK_LEAN`·`SHALLOW`·`HEEL_RISE`, 정면 편측 valgus. 사람마다 세션 2개
 3. **Supabase + WorkManager 동기화** — Room 이후
 4. 미판정 항목: 뒤꿈치 들림(분모·기준선을 먼저 고쳐야 함), 좌우 비대칭(현 신호로는 기존 판정과 100% 중복), 정면·측면을 한 세션에서 보는 구조

@@ -31,6 +31,8 @@ data class CompletedRepInput(
     val minKneeAngle: Float?,
     val maxTorsoLeanDegrees: Float?,
     val validFrameRatio: Float,
+    /** 무릎 편차가 가장 컸던 쪽. 사람 기준 좌/우. */
+    val kneeToeSide: String?,
 )
 
 /** 세션 성능 지표. 없으면(프레임을 한 장도 못 돌린 경우) null로 넘긴다. */
@@ -135,5 +137,6 @@ class WorkoutRepository @Inject constructor(
         minKneeAngle = minKneeAngle,
         maxTorsoLeanDegrees = maxTorsoLeanDegrees,
         validFrameRatio = validFrameRatio,
+        kneeToeSide = kneeToeSide,
     )
 }
