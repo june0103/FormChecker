@@ -203,7 +203,9 @@ private fun WorkoutContent(
                 Text("뒤로", style = MaterialTheme.typography.labelMedium)
             }
             Button(
-                onClick = { onFinish("placeholder-session-id") },
+                // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
+                // 아직 없는 행을 조회하게 된다.
+                onClick = { viewModel.finishSession(onFinish) },
                 modifier = Modifier.weight(2f).height(TouchTarget.minSize),
                 contentPadding = CompactButtonPadding,
             ) {
