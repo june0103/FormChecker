@@ -3,6 +3,7 @@ package com.mist.formchecker.poseengine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -221,5 +222,222 @@ class DepthBasisTest {
         val form = analyzer.analyze(sidePose(60f), aspect, CameraAngle.SIDE, features)
 
         assertEquals(features.trunkLean, form.torsoLeanDegrees)
+    }
+
+    // ── 골반 좌우 쏠림 ──────────────────────────────────────
+
+    /**
+     * 정면 자세. 힙·무릎·발목을 수직으로 쌓고 골반만 [hipOffset]만큼 옆으로 밀어
+     * 쏠림을 직접 만든다.
+     *
+     * `hip_shift_ratio = (hipCenter.x − ankleCenter.x) / 발목 간격`이므로 발목 간격을
+     * 0.10(등방 0.075)으로 두면 오프셋을 비율로 바로 환산할 수 있다.
+     */
+    private fun frontPose(hipOffset: Float): Pose {
+        val ankleSpread = 0.10f
+        val points = mutableMapOf<KeypointType, Pair<Float, Float>>()
+        fun sides(left: KeypointType, right: KeypointType, x: Float, y: Float, spread: Float) {
+            points[left] = (x - spread / 2) to y
+            points[right] = (x + spread / 2) to y
+        }
+        sides(KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE, 0.50f, 0.90f, ankleSpread)
+        sides(KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE, 0.50f, 0.70f, ankleSpread)
+        sides(
+            KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP,
+            0.50f + hipOffset, 0.50f, ankleSpread,
+        )
+        sides(
+            KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER,
+            0.50f + hipOffset, 0.30f, 0.20f,
+        )
+        points[KeypointType.NECK] = (0.50f + hipOffset) to 0.28f
+        sides(KeypointType.LEFT_HEEL, KeypointType.RIGHT_HEEL, 0.50f, 0.94f, ankleSpread)
+        sides(KeypointType.LEFT_BIG_TOE, KeypointType.RIGHT_BIG_TOE, 0.50f, 0.98f, ankleSpread)
+        sides(KeypointType.LEFT_SMALL_TOE, KeypointType.RIGHT_SMALL_TOE, 0.50f, 0.98f, ankleSpread)
+
+        return Pose(
+            KeypointType.entries.map { type ->
+                val point = points[type]
+                if (point == null) Keypoint(type, 0f, 0f, 0f)
+                else Keypoint(type, point.first, point.second, 0.9f)
+            },
+            0L,
+        )
+    }
+
+    private fun frontFeatures(hipOffset: Float): FrameFeatures {
+        val calibration = StandingCalibration.from(List(30) { frontPose(0f) to aspect })!!
+        return FrameFeatures.from(
+            pose = frontPose(hipOffset),
+            aspectRatio = aspect,
+            calibration = calibration,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+    }
+
+    private fun frontForm(hipOffset: Float) = analyzer.analyze(
+        frontPose(hipOffset), aspect, CameraAngle.FRONT, frontFeatures(hipOffset),
+    )
+
+    /**
+     * 자체 수집 데이터로 확정한 첫 임계값의 회귀 테스트.
+     *
+     * 정상 의도 9명 794프레임에서 |쏠림| p99이 0.082였고 한계를 0.10으로 뒀다. 이 값이
+     * 전이 가능한 이유는 발목 간격으로 정규화해 **사람 간 변동이 사람 내의 1.04배**까지
+     * 내려갔기 때문이다 — 무릎 내측 이동은 어떤 정규화로도 2.4배 아래로 내려가지 않았다.
+     */
+    @Test
+    fun `정상 범위 안의 골반 쏠림은 경고하지 않는다`() {
+        val form = frontForm(0f)
+        assertEquals(0f, form.hipShiftRatio!!, 0.01f)
+        assertEquals(false, form.warnings.contains(FormWarning.HIP_SHIFT))
+    }
+
+    @Test
+    fun `한계를 넘는 골반 쏠림은 경고한다`() {
+        // 오프셋 0.02 → 등방 보정 후 발목 간격(0.075) 대비 0.2 → 한계 0.10의 두 배.
+        val form = frontForm(0.02f)
+        assertEquals(
+            "쏠림이 한계를 넘어야 한다 (실제: ${form.hipShiftRatio})",
+            true,
+            form.warnings.contains(FormWarning.HIP_SHIFT),
+        )
+    }
+
+    /** 부호는 어느 쪽으로 쏠렸는지만 알려준다. 판정은 크기로 한다. */
+    @Test
+    fun `반대쪽으로 쏠려도 같게 판정한다`() {
+        assertEquals(
+            frontForm(0.02f).warnings.contains(FormWarning.HIP_SHIFT),
+            frontForm(-0.02f).warnings.contains(FormWarning.HIP_SHIFT),
+        )
+    }
+
+    /**
+     * 측면에서는 계산하지 않는다. 좌우 간격이 카메라 축 방향이라 원근으로 압축되고,
+     * 그 값으로 판정하면 "몸이 얼마나 정확히 측면을 향했는가"를 재게 된다.
+     */
+    @Test
+    fun `측면에서는 골반 쏠림을 판정하지 않는다`() {
+        val side = analyzer.analyze(sidePose(90f), aspect, CameraAngle.SIDE, featuresAt(90f))
+        assertNull(side.hipShiftRatio)
+    }
+
+    // ── 무릎–발끝 정렬 ──────────────────────────────────────
+
+    /**
+     * 무릎만 [kneeOffset]만큼 옮긴 정면 자세. 발끝은 발목 위에 둔다.
+     *
+     * 발목 간격을 0.10(등방 0.075)으로 두었으므로 오프셋을 그 값으로 나누면 비율이 된다.
+     */
+    private fun kneeShiftedPose(kneeOffset: Float): Pose {
+        val spread = 0.10f
+        val points = mutableMapOf<KeypointType, Pair<Float, Float>>()
+        // 사람의 왼쪽은 화면 오른쪽(x 큼)에 나타난다 — 엔진의 부호 규약과 맞춰야 한다.
+        // 여기를 뒤집으면 내측/외측 판정이 통째로 반대가 된다.
+        fun sides(left: KeypointType, right: KeypointType, x: Float, y: Float, s: Float) {
+            points[left] = (x + s / 2) to y
+            points[right] = (x - s / 2) to y
+        }
+        sides(KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE, 0.50f, 0.90f, spread)
+        // 내측(+)은 왼쪽 무릎을 x 감소, 오른쪽 무릎을 x 증가 방향으로 옮기는 것이다.
+        points[KeypointType.LEFT_KNEE] = (0.50f + spread / 2 - kneeOffset) to 0.70f
+        points[KeypointType.RIGHT_KNEE] = (0.50f - spread / 2 + kneeOffset) to 0.70f
+        sides(KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP, 0.50f, 0.50f, spread)
+        sides(KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER, 0.50f, 0.30f, 0.20f)
+        points[KeypointType.NECK] = 0.50f to 0.28f
+        sides(KeypointType.LEFT_HEEL, KeypointType.RIGHT_HEEL, 0.50f, 0.94f, spread)
+        sides(KeypointType.LEFT_BIG_TOE, KeypointType.RIGHT_BIG_TOE, 0.50f, 0.98f, spread)
+        sides(KeypointType.LEFT_SMALL_TOE, KeypointType.RIGHT_SMALL_TOE, 0.50f, 0.98f, spread)
+
+        return Pose(
+            KeypointType.entries.map { type ->
+                val point = points[type]
+                if (point == null) Keypoint(type, 0f, 0f, 0f)
+                else Keypoint(type, point.first, point.second, 0.9f)
+            },
+            0L,
+        )
+    }
+
+    private fun kneeForm(kneeOffset: Float): SquatForm {
+        val calibration = StandingCalibration.from(List(30) { kneeShiftedPose(0f) to aspect })!!
+        val features = FrameFeatures.from(
+            pose = kneeShiftedPose(kneeOffset),
+            aspectRatio = aspect,
+            calibration = calibration,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+        return analyzer.analyze(kneeShiftedPose(kneeOffset), aspect, CameraAngle.FRONT, features)
+    }
+
+    /**
+     * 기준점 0은 정의다 — 올바른 스쿼트는 무릎이 발끝 방향으로 내려간다. 실측 11명
+     * 253 rep 최저점의 중앙값이 0.0000으로 그 정의가 확인됐다.
+     */
+    @Test
+    fun `무릎이 발끝 위에 있으면 정상이다`() {
+        val form = kneeForm(0f)
+        assertEquals(0f, form.kneeToeDeviation!!, 0.01f)
+        assertEquals(KneeAlignment.GOOD, form.kneeAlignment)
+        assertTrue(form.warnings.none { it == FormWarning.KNEE_VALGUS })
+        assertTrue(form.warnings.none { it == FormWarning.KNEE_FLARED })
+    }
+
+    /** 안으로 말리면 valgus. 부상 위험이 큰 쪽이다. */
+    @Test
+    fun `무릎이 안으로 말리면 valgus로 본다`() {
+        val form = kneeForm(0.02f)
+        assertEquals(KneeAlignment.VALGUS, form.kneeAlignment)
+        assertTrue(form.warnings.contains(FormWarning.KNEE_VALGUS))
+    }
+
+    /**
+     * **과도하게 벌리는 것도 오류다.** 두 상태(GOOD/VALGUS)로 두면 "많이 벌리면 벌릴수록
+     * 좋다"가 되어 이 오류를 아예 보지 못한다.
+     */
+    @Test
+    fun `무릎이 과도하게 벌어지면 오류로 본다`() {
+        val form = kneeForm(-0.02f)
+        assertEquals(KneeAlignment.FLARED, form.kneeAlignment)
+        assertTrue(form.warnings.contains(FormWarning.KNEE_FLARED))
+    }
+
+    /** 허용폭 안이면 양쪽 다 정상이다. 사람내 MAD 0.0333의 3배에서 나온 값이다. */
+    @Test
+    fun `허용폭 안의 벗어남은 정상이다`() {
+        // 오프셋 0.007 → 등방 발목 간격 0.075 대비 약 0.09 < 허용폭 0.10
+        assertEquals(KneeAlignment.GOOD, kneeForm(0.007f).kneeAlignment)
+        assertEquals(KneeAlignment.GOOD, kneeForm(-0.007f).kneeAlignment)
+    }
+
+    /**
+     * 측면에서는 판정하지 않는다. 좌우 간격이 카메라 축 방향이라 무릎·발끝이 겹쳐
+     * 값이 무의미해진다.
+     */
+    @Test
+    fun `측면에서는 무릎 정렬을 판정하지 않는다`() {
+        val side = analyzer.analyze(sidePose(90f), aspect, CameraAngle.SIDE, featuresAt(90f))
+        assertNull(side.kneeToeDeviation)
+        assertNull(side.kneeAlignment)
+    }
+
+    /**
+     * 무릎폭 증가 배수 방식은 실측에서 무작동이었다 — 정상 표본의 배수가 1.53~2.04인데
+     * 임계값이 1.1이라 통과율 100%다. 그 사실을 테스트로 고정해, 되살릴 때 이 숫자를
+     * 다시 조사하지 않게 한다.
+     */
+    @Test
+    fun `무릎폭 배수 방식은 정상 표본을 전부 통과시킨다`() {
+        // 실측 사람별 배수 최소 1.58 ~ 최대 2.04.
+        listOf(1.53f, 1.58f, 1.79f, 2.04f).forEach { gain ->
+            assertEquals(
+                "배수 $gain 은 임계값 ${thresholds.valgusSpreadGain} 위라 통과한다",
+                KneeAlignment.GOOD,
+                thresholds.kneeAlignmentOf(standingRatio = 0.8f, bottomRatio = 0.8f * gain),
+            )
+        }
     }
 }

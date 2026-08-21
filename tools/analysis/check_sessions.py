@@ -13,6 +13,12 @@
 전부 실측에서 나온 숫자다. 통과선은 "정상일 때 실측값"과 "고장났을 때 실측값" 사이에
 둔다 — 어느 쪽에서도 여유가 있어야 경계가 흔들리지 않는다.
 
+## ⚠ 대리 지표를 쓰지 않는다
+초기 버전은 "최저점 근처에 프레임이 몇 개 있나"로 극값 위험을 쟀다. 실측 15세션에서
+그 기준으로 13개가 실패로 걸렸는데, **놓친 양을 직접 계산해 보니 중앙값 0.12°였다** —
+쓸 수 있는 세션을 버리게 만드는 기준이었다. 재기 어려워 보이는 값이라도 대리 지표로
+바꾸기 전에, 정말 계산할 수 없는지 먼저 확인해야 한다.
+
 사용법:
     python check_sessions.py <세션폴더 또는 captures 폴더> [...]
 """
@@ -24,7 +30,7 @@ import sys
 from collections import Counter
 
 import console
-from capture_data import Session, features_for, load_all, num
+from capture_data import Session, features_for, load_all, num, peak_losses
 
 # ── 통과 기준 ───────────────────────────────────────────────
 
@@ -52,13 +58,20 @@ MAX_FIRST_FLEXION = 15.0
 # rep 자동 제외 기준(유효 프레임 90%)과 앞뒤가 맞는다.
 MIN_FEATURE_FILL = 0.90
 
-# 극값 여유 = bottom_dwell_ms / max_frame_interval_ms.
-# 최저점 근처에 프레임이 이만큼은 있어야 최대 굴곡·깊이를 놓치지 않는다. 실측 여유가
-# 좌측면 3.4배, 우측면 5.9배였다. 3 아래로 내려간 rep은 극값을 의심해야 한다.
-MIN_EXTREMUM_MARGIN = 3.0
+# 극값 손실(도) — 이산 샘플링 때문에 최대 굴곡을 얼마나 낮게 봤는지.
+#
+# 처음에는 `bottom_dwell_ms / max_frame_interval_ms`("최저점 근처 표본 수")로 위험을
+# 쟀는데 **근거가 약했다.** 실측 15세션에서 그 기준으로는 13개가 걸렸지만, 놓친 양을
+# 직접 계산해 보니 중앙값 0.12°, 최악 세션 0.34°, 최악 단일 rep 1.69°였다. 최저점은
+# 매끄러운 전환점이라 표본이 1~2개여도 오차가 곡률 × dt²로 작기 때문이다.
+#
+# 1.0°는 최악 세션(0.34°) 대비 약 3배 여유다. 패럴렐 판정 허용폭이 대퇴 3°에서 나왔으므로
+# 1° 손실은 그 1/3이고, 판정을 뒤집을 수 있는 크기가 아니다.
+MAX_PEAK_LOSS_DEGREES = 1.0
 
-# 그런 rep이 몇 개까지 허용되나. 몇 개는 걸러 쓰면 되지만 절반이 그러면 세션이 문제다.
-MAX_LOW_MARGIN_RATIO = 0.2
+# 깊이비 손실 상한. 측면 세션에서만 계산된다. 패럴렐 허용폭 0.03의 1/6이며 실측
+# 최악이 0.0009였다.
+MAX_PEAK_LOSS_RATIO = 0.005
 
 # 이상치 비율. 너무 높으면 세션이 일관되지 않았다는 뜻이다(워밍업, 중간 휴식, 자세 변화).
 MAX_OUTLIER_RATIO = 0.35
@@ -178,7 +191,29 @@ def inspect(session: Session) -> Result:
         f"{session.view} 필수 특징 최저 채움률 {worst_fill:.0%} ({worst_name or '-'})",
     )
 
-    # ── 극값 여유 ───────────────────────────────────────────
+    # ── 극값 손실 ───────────────────────────────────────────
+    losses = peak_losses(session)
+    if losses:
+        median_loss = st.median(losses)
+        result.check(
+            median_loss <= MAX_PEAK_LOSS_DEGREES,
+            f"극값 손실 중앙값 {median_loss:.2f}° (최악 {max(losses):.2f}°, "
+            f"{len(losses)}/{len(reps)} rep 계산됨)",
+        )
+    else:
+        result.check(False, "극값 손실을 계산할 수 없다 — 굴곡이 비어 있다")
+
+    # 측면 세션은 깊이비로도 확인한다. 깊이가 판정의 근거이므로 그 단위로 봐야 한다.
+    if not session.view == "FRONT":
+        depth_losses = peak_losses(session, "depth_ratio")
+        if depth_losses:
+            median_depth = st.median(depth_losses)
+            result.check(
+                median_depth <= MAX_PEAK_LOSS_RATIO,
+                f"깊이비 손실 중앙값 {median_depth:.4f} (최악 {max(depth_losses):.4f})",
+            )
+
+    # 샘플링 조밀도는 판정하지 않고 보고만 한다 — 실제 영향은 위 손실이 잡는다.
     margins = []
     for r in reps:
         dwell = num(r, "bottom_dwell_ms")
@@ -186,15 +221,10 @@ def inspect(session: Session) -> Result:
         if dwell is not None and interval and interval > 0:
             margins.append(dwell / interval)
     if margins:
-        low = sum(1 for m in margins if m < MIN_EXTREMUM_MARGIN)
         result.check(
-            low / len(margins) <= MAX_LOW_MARGIN_RATIO,
-            f"극값 여유 중앙값 {st.median(margins):.1f}프레임, "
-            f"{MIN_EXTREMUM_MARGIN}프레임 미달 {low}/{len(margins)}개",
+            True,
+            f"최저점 체류 / 최대 프레임 간격 중앙값 {st.median(margins):.1f}프레임 (참고)",
         )
-    else:
-        # 옛 빌드로 찍은 세션. 판단 근거가 없다는 사실 자체를 보고한다.
-        result.check(False, "bottom_dwell_ms / max_frame_interval_ms 컬럼이 없다 (옛 빌드)")
 
     # ── 실효 fps ────────────────────────────────────────────
     intervals = [num(r, "frame_interval_ms") for r in reps]

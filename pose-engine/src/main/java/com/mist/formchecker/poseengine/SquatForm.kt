@@ -54,13 +54,23 @@ enum class PoseVisibility {
     FULL,
 }
 
-/** 무릎 정렬 상태. 정면 촬영에서만 판정한다. */
+/**
+ * 무릎 정렬 상태. 정면 촬영에서만 판정한다.
+ *
+ * ## 왜 세 상태인가
+ * 올바른 스쿼트는 무릎이 **발끝 방향으로** 내려간다. 안으로 말리는 것과 과도하게 벌리는 것
+ * **둘 다 오류**다. 두 상태(GOOD/VALGUS)로 두면 "많이 벌리면 벌릴수록 좋다"가 되어 한쪽
+ * 오류를 아예 보지 못한다.
+ */
 enum class KneeAlignment {
-    /** 무릎이 발목 위에 적절히 놓임. */
+    /** 무릎이 발끝 방향에 놓임. */
     GOOD,
 
     /** 무릎이 안으로 말림(valgus). 부상 위험이 큰 대표적 오류. */
     VALGUS,
+
+    /** 무릎이 발끝보다 과도하게 벌어짐. */
+    FLARED,
 }
 
 /**
@@ -106,6 +116,21 @@ data class SquatForm(
      * 판정에 쓰지 않고 데이터 측 domain gap 검증용으로 기록만 한다.
      */
     val kneeSpreadRatio: Float?,
+    /**
+     * 골반 좌우 쏠림 `(hipCenter.x − ankleCenter.x) / 발목 간격`. 부호 있음. 정면 전용.
+     *
+     * 자체 수집 데이터로 확정한 첫 임계값의 대상이다
+     * ([FormThresholds.hipShiftLimit] 주석의 분포 참고).
+     */
+    val hipShiftRatio: Float?,
+    /**
+     * 무릎–발끝 정렬. 좌우 중 벗어남이 큰 쪽. 부호 있음(양수 = 내측). 정면 전용.
+     *
+     * 0이 정답이고 양쪽 다 오류다 — 판정은 [FormThresholds.kneeAlignmentByToe]가 한다.
+     */
+    val kneeToeDeviation: Float?,
+    /** [kneeToeDeviation] 기준 무릎 정렬. **프레임 단위**로 판정한다. */
+    val kneeAlignment: KneeAlignment?,
     val asymmetryDegrees: Float?,
     /**
      * 실제 촬영 각도가 [cameraAngle]과 다르다고 추정될 때 그 각도.
@@ -135,6 +160,22 @@ enum class FormWarning(val message: String) {
      * 이 값을 쓴다.
      */
     KNEE_VALGUS("무릎을 벌려주세요"),
+
+    /**
+     * 무릎이 발끝보다 과도하게 벌어졌다.
+     *
+     * [KNEE_VALGUS]와 달리 프레임 단위로 판정한다 — 무릎–발끝 정렬은 기준점이 0이라
+     * 선 자세 기준선이 필요 없다.
+     */
+    KNEE_FLARED("무릎을 발끝 방향으로 모아주세요"),
     SHALLOW_DEPTH("더 깊게 앉아주세요"),
     EXCESSIVE_LEAN("상체를 세워주세요"),
+
+    /**
+     * 골반이 한쪽으로 쏠렸다. 정면 전용.
+     *
+     * 프레임 단위로 판정할 수 있다 — 선 자세 기준선이 필요 없고 발목 간격으로 정규화되므로
+     * 체형에 무관하다(사람 간 변동이 사람 내의 1.04배).
+     */
+    HIP_SHIFT("체중을 양발에 고르게 실어주세요"),
 }

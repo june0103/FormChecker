@@ -71,6 +71,22 @@ class SquatFormAnalyzer(
             null
         }
 
+        // 골반 좌우 쏠림. 발목 간격 정규화라 기준선이 필요 없고, 좌우 비대칭 판정에
+        // 속하므로 정면에서만 본다.
+        val hipShiftRatio = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
+            features?.hipShiftRatio
+        } else {
+            null
+        }
+
+        // 무릎–발끝 정렬. 좌우 중 벗어남이 큰 쪽을 쓴다 — 한쪽만 말려도 오류다.
+        val kneeToeDeviation = if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
+            listOfNotNull(features?.leftKneeToeDeviation, features?.rightKneeToeDeviation)
+                .maxByOrNull { abs(it) }
+        } else {
+            null
+        }
+
         return SquatForm(
             cameraAngle = cameraAngle,
             visibility = visibility(pose),
@@ -81,15 +97,23 @@ class SquatFormAnalyzer(
             depthRatio = depthRatio,
             torsoLeanDegrees = torsoLean,
             kneeSpreadRatio = kneeSpreadRatio(pose),
+            hipShiftRatio = hipShiftRatio,
+            kneeToeDeviation = kneeToeDeviation,
+            kneeAlignment = form.kneeAlignmentByToe(kneeToeDeviation),
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
                 knees.asymmetry
             } else {
                 null
             },
             suggestedAngle = detectAngle(pose)?.takeIf { it != cameraAngle },
-            // 무릎 정렬 경고는 여기서 만들지 않는다. rep 단위 판정이라 선 자세
-            // 기준선이 필요하고, 그 기준선은 rep이 시작될 때만 확정된다.
-            warnings = warningsOf(depth, torsoLean),
+            // 무릎 정렬은 이제 프레임 단위다 — 무릎–발끝 정렬은 기준점이 0이라
+            // 선 자세 기준선이 필요 없다.
+            warnings = warningsOf(
+                depth = depth,
+                torsoLeanDegrees = torsoLean,
+                hipShiftRatio = hipShiftRatio,
+                kneeAlignment = form.kneeAlignmentByToe(kneeToeDeviation),
+            ),
         )
     }
 
@@ -97,10 +121,23 @@ class SquatFormAnalyzer(
     private fun warningsOf(
         depth: DepthLevel?,
         torsoLeanDegrees: Float?,
+        hipShiftRatio: Float?,
+        kneeAlignment: KneeAlignment?,
     ): List<FormWarning> = buildList {
         if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
         if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
             add(FormWarning.EXCESSIVE_LEAN)
+        }
+        // 부호는 어느 쪽으로 쏠렸는지만 알려주므로 크기로 판정한다.
+        if (hipShiftRatio != null && abs(hipShiftRatio) > form.hipShiftLimit) {
+            add(FormWarning.HIP_SHIFT)
+        }
+        // 무릎 정렬은 프레임 단위로 판정할 수 있다 — 기준점 0이 정의에서 나오므로 선
+        // 자세 기준선이 필요 없다. 그래서 rep이 끝나기를 기다리지 않고 경고한다.
+        when (kneeAlignment) {
+            KneeAlignment.VALGUS -> add(FormWarning.KNEE_VALGUS)
+            KneeAlignment.FLARED -> add(FormWarning.KNEE_FLARED)
+            else -> Unit
         }
     }
 

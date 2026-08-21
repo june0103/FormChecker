@@ -108,6 +108,10 @@ object CaptureExport {
         feature("stance_width_ratio") { it.stanceWidthRatio }
         feature("left_medial_knee") { it.leftMedialKneeDisplacement }
         feature("right_medial_knee") { it.rightMedialKneeDisplacement }
+        // 무릎–발끝 정렬. 0이 정답이고 양쪽 다 오류다 — 힙–발목 기준선 방식과 달리
+        // 기준점이 정의에서 나온다.
+        feature("left_knee_toe") { it.leftKneeToeDeviation }
+        feature("right_knee_toe") { it.rightKneeToeDeviation }
         feature("hip_shift_ratio") { it.hipShiftRatio }
         feature("pelvis_tilt") { it.pelvisTilt }
         feature("shoulder_tilt") { it.shoulderTilt }

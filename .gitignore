@@ -9,6 +9,8 @@
 /captures
 # 분석 도구 산출물 (tools/analysis)
 reference_range.csv
+__pycache__/
+*.pyc
 .externalNativeBuild
 .cxx
 local.properties
