@@ -80,7 +80,14 @@ class SquatFormAnalyzer(
         }
 
         // 무릎–발끝 정렬. 좌우 중 벗어남이 큰 쪽을 쓴다 — 한쪽만 말려도 오류다.
-        val kneeToeDeviation = if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
+        //
+        // 굴곡이 충분해야 판정한다. 선 자세에서는 무릎이 발끝보다 뒤에 있고 발끝은 바깥으로
+        // 벌어져 있어 2D 투영에서 무릎이 항상 "안쪽"으로 읽힌다 — 게이트가 없으면 가만히
+        // 서 있어도 경고가 뜬다(FormThresholds.kneeToeMinFlexion 주석의 실측 표 참고).
+        val kneeFlexion = knees.representative?.let { 180f - it }
+        val kneeToeJudgeable = cameraAngle.supports(FormCheck.KNEE_ALIGNMENT) &&
+            kneeFlexion != null && kneeFlexion >= form.kneeToeMinFlexion
+        val kneeToeDeviation = if (kneeToeJudgeable) {
             listOfNotNull(features?.leftKneeToeDeviation, features?.rightKneeToeDeviation)
                 .maxByOrNull { abs(it) }
         } else {
