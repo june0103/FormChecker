@@ -34,11 +34,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.CameraAngle
+import com.mist.formchecker.poseengine.StandingCalibration
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.PoseVisibility
+import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.SquatForm
@@ -172,6 +174,12 @@ private fun WorkoutContent(
         CameraAngleSelector(
             selected = state.cameraAngle,
             onSelect = viewModel::selectCameraAngle,
+        )
+
+        CalibrationBar(
+            state = state,
+            onStart = viewModel::startCalibration,
+            onCancel = viewModel::cancelCalibration,
         )
 
         // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
@@ -352,6 +360,28 @@ private fun HudBottomBand(
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextPrimary,
             )
+        }
+
+        // 기준선으로 정규화한 값. 판정에는 아직 쓰지 않고, **기준선이 맞는지 눈으로
+        // 확인하는** 용도다 — 서 있을 때 깊이가 0 근처인지, 앉으면 커지는지를 기기에서
+        // 봐야 판정을 이 값으로 옮길 수 있다.
+        state.features?.let { features ->
+            val normalized = buildList {
+                features.depthRatio?.let { add("깊이비 ${it.formatRatio()}") }
+                features.thighAngle?.let { add("대퇴 ${it.format()}°") }
+                features.trunkLean?.let { add("몸통 ${it.format()}°") }
+                features.hipDropRatio?.let { add("힙낙하 ${it.formatRatio()}") }
+                features.leftMedialKneeDisplacement?.let { add("무릎(왼) ${it.formatRatio()}") }
+                features.rightMedialKneeDisplacement?.let { add("무릎(오른) ${it.formatRatio()}") }
+                features.hipShiftRatio?.let { add("힙쏠림 ${it.formatRatio()}") }
+            }
+            if (normalized.isNotEmpty()) {
+                Text(
+                    text = "기준선 · " + normalized.joinToString("  ·  "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LimeGreen,
+                )
+            }
         }
 
         // 개발용 수치. 사용자에게는 의미가 없어 최소 크기로 두고, 나중에 토글로 끈다.
@@ -569,6 +599,100 @@ private fun FormWarningRow(warning: FormWarning, modifier: Modifier = Modifier) 
         )
     }
 }
+
+/**
+ * 기준 자세 측정 줄.
+ *
+ * ## 왜 운동 흐름을 막지 않는가
+ * 수집 화면은 캘리브레이션이 실패하면 진행을 막는다 — 기준선이 잘못되면 그 세션 전체가
+ * 쓸 수 없다. 운동 화면은 제품이고, **rep 카운팅은 무릎 각도만 쓰므로 기준선 없이도
+ * 동작한다.** 카운팅을 막으면 얻는 것 없이 운동만 끊긴다.
+ *
+ * 그래서 여기서는 기준선이 **없으면 무엇을 못 하는지**만 알린다. 문서 §2.3이 카운팅과
+ * 자세 평가를 분리한 것과 같은 이유다.
+ */
+@Composable
+private fun CalibrationBar(
+    state: WorkoutUiState,
+    onStart: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        when (state.calibrationStage) {
+            CalibrationStage.COLLECTING -> {
+                val seconds = (state.calibrationRemainingMs + 999) / 1000
+                Text(
+                    text = "곧게 서서 그대로 계세요 — ${seconds}초",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LimeGreen,
+                )
+                Text(
+                    // 다시 채워지는 이유를 알려줘야 사용자가 자세를 고칠 수 있다.
+                    text = "필수 관절이 가려지면 처음부터 다시 셉니다.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                )
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+                ) { Text("취소") }
+            }
+
+            CalibrationStage.READY -> {
+                val calibration = state.calibration
+                Text(
+                    text = buildString {
+                        append("기준선 확보")
+                        state.activeSide?.let { append(" · ${it.label()} 기준") }
+                        calibration?.let {
+                            append(" · 다리 ${it.legLength.formatRatio()}")
+                            append(" · 대퇴/정강이 ${it.femurTibiaRatio.formatRatio()}")
+                            append(" · 지터 ${"%.4f".format(it.jitter)}")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LimeGreen,
+                )
+                // 차단하지 않는 문제. 어떤 특징이 빠지는지 알려야 한다.
+                state.calibrationProblems.forEach { CalibrationProblemRow(it) }
+                OutlinedButton(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+                ) { Text("기준 자세 다시 측정") }
+            }
+
+            CalibrationStage.NONE -> {
+                Text(
+                    text = "기준 자세를 재지 않았습니다 — 횟수는 세지만 깊이·상체·무릎 " +
+                        "정렬을 몸 크기로 정규화할 수 없습니다.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                )
+                state.calibrationProblems.forEach { CalibrationProblemRow(it) }
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+                ) { Text("기준 자세 측정 (3초)") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalibrationProblemRow(problem: StandingCalibration.Problem) {
+    Text(
+        text = problem.message,
+        style = MaterialTheme.typography.labelSmall,
+        // 차단 여부로 색을 나눈다. 발 미검출은 진행을 막지 않으므로 경고가 아니다.
+        color = if (problem.blocking) FeedbackWarning else TextMuted,
+    )
+}
+
+private fun Side.label(): String = if (this == Side.LEFT) "왼쪽" else "오른쪽"
 
 private fun Float.formatRatio(): String = "%.2f".format(this)
 
