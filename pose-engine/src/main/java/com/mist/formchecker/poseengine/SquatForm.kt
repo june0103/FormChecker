@@ -22,6 +22,21 @@ enum class DepthLevel {
 }
 
 /**
+ * 깊이를 무엇으로 판정했는지.
+ *
+ * 두 기준은 **서로 환산되지 않는다** — 같은 깊이에서도 대퇴/정강이 비율에 따라 무릎 각도가
+ * 달라진다. 그래서 결과에 어느 쪽을 썼는지 남긴다. 남기지 않으면 기준선이 생기거나
+ * 사라질 때 판정이 조용히 바뀌고, 그건 리포트에서 원인을 찾을 수 없는 종류의 변화다.
+ */
+enum class DepthBasis {
+    /** 무릎 각도. 기준선이 없을 때의 대체 경로다. */
+    KNEE_ANGLE,
+
+    /** 엉덩이 높이 비율. 기준선이 있을 때 쓰며, 패럴렐 경계가 정의에서 나온다. */
+    HIP_HEIGHT,
+}
+
+/**
  * 판정에 필요한 부위가 얼마나 보이는지.
  *
  * 스켈레톤은 그려지는데 각도는 안 나오는 상황이 실제로 자주 생긴다 — 상체는 잡히고
@@ -70,6 +85,15 @@ data class SquatForm(
      */
     val hipAngles: BilateralAngles,
     val depth: DepthLevel?,
+    /** [depth]를 무엇으로 판정했는지. 판정하지 못했으면 null. */
+    val depthBasis: DepthBasis?,
+    /**
+     * `(hip.y − knee.y) / legLength`. 기준선이 없으면 null.
+     *
+     * 판정값이 아니라 측정값이다. 패럴렐이 0이라는 정의를 화면에서 눈으로 확인할 수 있게
+     * 남긴다.
+     */
+    val depthRatio: Float?,
     val torsoLeanDegrees: Float?,
     /**
      * 무릎폭 ÷ 발목폭. **판정이 아니라 측정값이다.**

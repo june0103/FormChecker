@@ -16,6 +16,16 @@ enum class ThresholdOrigin {
 
     /** AI Hub 실측 분포로 확정된 값. */
     DATA_DERIVED,
+
+    /**
+     * 정의에서 나온 값. **데이터로 바뀌지 않는다.**
+     *
+     * "패럴렐"은 대퇴가 수평인 상태이고, 그건 힙이 무릎과 같은 높이라는 뜻이다. 그래서
+     * `depth_ratio = 0`은 측정으로 정할 값이 아니라 정의다. 무릎 각도로 같은 것을
+     * 정의하려면 체절 비율을 알아야 하므로 사람마다 값이 달라진다 — 각도 기준을 버리는
+     * 이유가 이것이다.
+     */
+    DEFINITION,
 }
 
 /**
@@ -44,6 +54,39 @@ data class FormThresholds(
 
     /** 이 각도 미만이면 충분히 깊게 앉은 것으로 본다. */
     val deepAngle: Float = 100f,
+
+    // ── 깊이: 엉덩이 높이 기준 (기준선이 있을 때) ───────────
+    //
+    // `depth_ratio = (hip.y − knee.y) / legLength`. 화면 y는 아래로 증가하므로 힙이
+    // 무릎보다 위면 음수, 같은 높이면 0, 아래면 양수다.
+
+    /**
+     * 이 값 이하면 아직 서 있는 것으로 본다.
+     *
+     * 선 자세는 힙이 무릎보다 대퇴 하나만큼 위이므로 `-대퇴/다리 ≈ -0.5`다. 실측
+     * 앱 −0.51~−0.53, 수집 데이터 하강 0~20% 구간 p50 −0.479 / p95 −0.442였다.
+     * −0.40은 그 구간을 확실히 벗어난 지점이다.
+     */
+    val standingDepthRatio: Float = -0.40f,
+
+    /**
+     * 패럴렐 판정 허용폭.
+     *
+     * 경계 자체는 0(대퇴 수평)이지만 정확히 0을 쓰면 **측정 오차만큼 부족한 rep을 오류로
+     * 보고한다.** 관절 중심 추정 오차를 각도로 환산하면 대퇴 3° 정도이고,
+     * `대퇴/다리 ≈ 0.5`이므로 `0.5 × sin(3°) = 0.026`이다. 실측에서 대퇴가 수평까지 3.08°
+     * 남았던 세션의 `max_depth_ratio`가 정확히 −0.026이었다 — 두 경로가 같은 값을 낸다.
+     */
+    val parallelToleranceRatio: Float = 0.03f,
+
+    /**
+     * 이 값 이상이면 충분히 깊게 앉은 것으로 본다.
+     *
+     * 실측 두 사람의 최저점이 −0.026과 +0.060이었다. 한 명은 패럴렐에 못 미치고 한 명은
+     * 확실히 넘었다는 뜻이므로 그 사이에 두었지만, **표본 2명으로 정한 값이다.**
+     * 기준 데이터가 모이면 `reference_range.csv`의 최저점 백분위수로 교체할 것.
+     */
+    val deepDepthRatio: Float = 0.05f,
 
     /**
      * 최저점의 무릎폭/발목폭이 **선 자세 기준선의 이 배수 미만**이면 valgus로 본다.
@@ -97,6 +140,28 @@ data class FormThresholds(
     }
 
     /**
+     * 엉덩이 높이로 깊이를 판정한다. 기준선이 있을 때 쓴다.
+     *
+     * ## 왜 무릎 각도가 아닌가
+     * **"패럴렐"의 정의가 대퇴 수평, 즉 엉덩이가 무릎 높이다.** 무릎 각도는 같은 깊이에서도
+     * 대퇴/정강이 비율에 따라 달라지므로, 각도로 패럴렐을 정의하면 사람마다 다른 깊이를
+     * 같다고 하거나 같은 깊이를 다르다고 한다. 실측에서 두 사람의 최저점 무릎 굴곡이
+     * 109.8°와 125.5°로 16° 차이였는데, 체절 비율 차이는 측정 노이즈보다 작았다 — 각도
+     * 차이가 체형이 아니라 실제 깊이 차이였다는 뜻이다.
+     *
+     * 두 판정 경로는 **서로 환산되지 않는다.** 그래서 어느 기준을 썼는지 결과에 남긴다
+     * ([SquatForm.depthBasis]).
+     *
+     * @param depthRatio `(hip.y − knee.y) / legLength`. 힙이 무릎보다 위면 음수.
+     */
+    fun depthLevelByRatio(depthRatio: Float): DepthLevel = when {
+        depthRatio <= standingDepthRatio -> DepthLevel.STANDING
+        depthRatio >= deepDepthRatio -> DepthLevel.DEEP
+        depthRatio >= -parallelToleranceRatio -> DepthLevel.PARALLEL
+        else -> DepthLevel.SHALLOW
+    }
+
+    /**
      * 무릎 정렬을 **rep 단위**로 판정한다. 정면 촬영 전용.
      *
      * 프레임 단위로 판정할 수 없는 이유: 기준선이 필요하고, 그 기준선은 그 rep의 선 자세
@@ -127,6 +192,10 @@ data class FormThresholds(
         val ORIGINS: Map<String, ThresholdOrigin> = mapOf(
             "standingAngle" to ThresholdOrigin.DESIGN_DOC,
             "shallowAngle" to ThresholdOrigin.DESIGN_DOC,
+            // 깊이 비율 기준. 패럴렐 경계만 정의에서 나오고 나머지는 실측이 필요하다.
+            "standingDepthRatio" to ThresholdOrigin.PROVISIONAL,
+            "parallelToleranceRatio" to ThresholdOrigin.DEFINITION,
+            "deepDepthRatio" to ThresholdOrigin.PROVISIONAL,
             "deepAngle" to ThresholdOrigin.DESIGN_DOC,
             "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             "torsoLeanLimitDegrees" to ThresholdOrigin.PROVISIONAL,

@@ -35,6 +35,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.StandingCalibration
+import com.mist.formchecker.poseengine.DepthBasis
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FormWarning
@@ -277,7 +278,12 @@ private fun HudTopBand(
         Text(
             text = buildString {
                 append(state.repState.label())
-                state.lastRepDepth?.let { append("  ·  직전 깊이 ").append(it.label()) }
+                state.lastRepDepth?.let {
+                    append("  ·  직전 깊이 ").append(it.label())
+                    // 어느 기준으로 판정했는지 붙인다. 두 기준은 환산되지 않으므로
+                    // 표시하지 않으면 기준선이 생길 때 값이 조용히 바뀐 것처럼 보인다.
+                    state.lastRepDepthBasis?.let { basis -> append(basis.suffix()) }
+                }
                 // 무릎 정렬은 rep 단위 판정이라 여기(상단 rep 정보)에 온다.
                 // "참고"를 붙이는 이유: AI Hub 데이터에 무릎 모임 라벨이 없어 이 판정은
                 // 실측으로 검증된 바가 없다. 확정 판정처럼 보이면 안 된다.
@@ -346,7 +352,9 @@ private fun HudBottomBand(
 
         // 촬영 각도가 지원하는 판정만 표시한다.
         val judgements = buildList {
-            form?.depth?.let { add("깊이 ${it.label()}") }
+            form?.depth?.let { add("깊이 ${it.label()}${form.depthBasis?.suffix().orEmpty()}") }
+            // 패럴렐이 0이라는 정의를 눈으로 확인할 수 있게 원값도 보여준다.
+            form?.depthRatio?.let { add("깊이비 ${it.formatRatio()}") }
             form?.torsoLeanDegrees?.let { add("상체 ${it.format()}°") }
             // 판정이 아니라 측정값이다. 무릎 정렬 판정은 rep 단위이므로 상단에 있다.
             if (state.cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
@@ -695,6 +703,17 @@ private fun CalibrationProblemRow(problem: StandingCalibration.Problem) {
 private fun Side.label(): String = if (this == Side.LEFT) "왼쪽" else "오른쪽"
 
 private fun Float.formatRatio(): String = "%.2f".format(this)
+
+/**
+ * 판정 기준 꼬리표.
+ *
+ * 무릎 각도 기준은 같은 깊이에서도 체절 비율에 따라 달라진다. 기준선이 있을 때와 없을 때
+ * 판정이 바뀌는데, 그 사실을 표시하지 않으면 사용자·개발자 모두 원인을 찾을 수 없다.
+ */
+private fun DepthBasis.suffix(): String = when (this) {
+    DepthBasis.HIP_HEIGHT -> "(높이)"
+    DepthBasis.KNEE_ANGLE -> "(각도)"
+}
 
 private fun DepthLevel.label(): String = when (this) {
     DepthLevel.STANDING -> "서 있음"
