@@ -361,6 +361,8 @@ private fun HudBottomBand(
                 form?.kneeSpreadRatio?.let { add("무릎폭비 ${it.formatRatio()}") }
             }
             form?.asymmetryDegrees?.let { add("좌우차 ${it.format()}°") }
+            // 자체 수집 데이터로 임계값을 확정한 첫 항목. 경고는 warnings로 따로 나간다.
+            form?.hipShiftRatio?.let { add("힙쏠림 ${it.formatRatio()}") }
         }
         if (judgements.isNotEmpty()) {
             Text(

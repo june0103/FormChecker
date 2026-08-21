@@ -71,6 +71,14 @@ class SquatFormAnalyzer(
             null
         }
 
+        // 골반 좌우 쏠림. 발목 간격 정규화라 기준선이 필요 없고, 좌우 비대칭 판정에
+        // 속하므로 정면에서만 본다.
+        val hipShiftRatio = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
+            features?.hipShiftRatio
+        } else {
+            null
+        }
+
         return SquatForm(
             cameraAngle = cameraAngle,
             visibility = visibility(pose),
@@ -81,6 +89,7 @@ class SquatFormAnalyzer(
             depthRatio = depthRatio,
             torsoLeanDegrees = torsoLean,
             kneeSpreadRatio = kneeSpreadRatio(pose),
+            hipShiftRatio = hipShiftRatio,
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
                 knees.asymmetry
             } else {
@@ -89,7 +98,7 @@ class SquatFormAnalyzer(
             suggestedAngle = detectAngle(pose)?.takeIf { it != cameraAngle },
             // 무릎 정렬 경고는 여기서 만들지 않는다. rep 단위 판정이라 선 자세
             // 기준선이 필요하고, 그 기준선은 rep이 시작될 때만 확정된다.
-            warnings = warningsOf(depth, torsoLean),
+            warnings = warningsOf(depth, torsoLean, hipShiftRatio),
         )
     }
 
@@ -97,10 +106,15 @@ class SquatFormAnalyzer(
     private fun warningsOf(
         depth: DepthLevel?,
         torsoLeanDegrees: Float?,
+        hipShiftRatio: Float?,
     ): List<FormWarning> = buildList {
         if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
         if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
             add(FormWarning.EXCESSIVE_LEAN)
+        }
+        // 부호는 어느 쪽으로 쏠렸는지만 알려주므로 크기로 판정한다.
+        if (hipShiftRatio != null && abs(hipShiftRatio) > form.hipShiftLimit) {
+            add(FormWarning.HIP_SHIFT)
         }
     }
 

@@ -222,4 +222,104 @@ class DepthBasisTest {
 
         assertEquals(features.trunkLean, form.torsoLeanDegrees)
     }
+
+    // ── 골반 좌우 쏠림 ──────────────────────────────────────
+
+    /**
+     * 정면 자세. 힙·무릎·발목을 수직으로 쌓고 골반만 [hipOffset]만큼 옆으로 밀어
+     * 쏠림을 직접 만든다.
+     *
+     * `hip_shift_ratio = (hipCenter.x − ankleCenter.x) / 발목 간격`이므로 발목 간격을
+     * 0.10(등방 0.075)으로 두면 오프셋을 비율로 바로 환산할 수 있다.
+     */
+    private fun frontPose(hipOffset: Float): Pose {
+        val ankleSpread = 0.10f
+        val points = mutableMapOf<KeypointType, Pair<Float, Float>>()
+        fun sides(left: KeypointType, right: KeypointType, x: Float, y: Float, spread: Float) {
+            points[left] = (x - spread / 2) to y
+            points[right] = (x + spread / 2) to y
+        }
+        sides(KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE, 0.50f, 0.90f, ankleSpread)
+        sides(KeypointType.LEFT_KNEE, KeypointType.RIGHT_KNEE, 0.50f, 0.70f, ankleSpread)
+        sides(
+            KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP,
+            0.50f + hipOffset, 0.50f, ankleSpread,
+        )
+        sides(
+            KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER,
+            0.50f + hipOffset, 0.30f, 0.20f,
+        )
+        points[KeypointType.NECK] = (0.50f + hipOffset) to 0.28f
+        sides(KeypointType.LEFT_HEEL, KeypointType.RIGHT_HEEL, 0.50f, 0.94f, ankleSpread)
+        sides(KeypointType.LEFT_BIG_TOE, KeypointType.RIGHT_BIG_TOE, 0.50f, 0.98f, ankleSpread)
+        sides(KeypointType.LEFT_SMALL_TOE, KeypointType.RIGHT_SMALL_TOE, 0.50f, 0.98f, ankleSpread)
+
+        return Pose(
+            KeypointType.entries.map { type ->
+                val point = points[type]
+                if (point == null) Keypoint(type, 0f, 0f, 0f)
+                else Keypoint(type, point.first, point.second, 0.9f)
+            },
+            0L,
+        )
+    }
+
+    private fun frontFeatures(hipOffset: Float): FrameFeatures {
+        val calibration = StandingCalibration.from(List(30) { frontPose(0f) to aspect })!!
+        return FrameFeatures.from(
+            pose = frontPose(hipOffset),
+            aspectRatio = aspect,
+            calibration = calibration,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+    }
+
+    private fun frontForm(hipOffset: Float) = analyzer.analyze(
+        frontPose(hipOffset), aspect, CameraAngle.FRONT, frontFeatures(hipOffset),
+    )
+
+    /**
+     * 자체 수집 데이터로 확정한 첫 임계값의 회귀 테스트.
+     *
+     * 정상 의도 9명 794프레임에서 |쏠림| p99이 0.082였고 한계를 0.10으로 뒀다. 이 값이
+     * 전이 가능한 이유는 발목 간격으로 정규화해 **사람 간 변동이 사람 내의 1.04배**까지
+     * 내려갔기 때문이다 — 무릎 내측 이동은 어떤 정규화로도 2.4배 아래로 내려가지 않았다.
+     */
+    @Test
+    fun `정상 범위 안의 골반 쏠림은 경고하지 않는다`() {
+        val form = frontForm(0f)
+        assertEquals(0f, form.hipShiftRatio!!, 0.01f)
+        assertEquals(false, form.warnings.contains(FormWarning.HIP_SHIFT))
+    }
+
+    @Test
+    fun `한계를 넘는 골반 쏠림은 경고한다`() {
+        // 오프셋 0.02 → 등방 보정 후 발목 간격(0.075) 대비 0.2 → 한계 0.10의 두 배.
+        val form = frontForm(0.02f)
+        assertEquals(
+            "쏠림이 한계를 넘어야 한다 (실제: ${form.hipShiftRatio})",
+            true,
+            form.warnings.contains(FormWarning.HIP_SHIFT),
+        )
+    }
+
+    /** 부호는 어느 쪽으로 쏠렸는지만 알려준다. 판정은 크기로 한다. */
+    @Test
+    fun `반대쪽으로 쏠려도 같게 판정한다`() {
+        assertEquals(
+            frontForm(0.02f).warnings.contains(FormWarning.HIP_SHIFT),
+            frontForm(-0.02f).warnings.contains(FormWarning.HIP_SHIFT),
+        )
+    }
+
+    /**
+     * 측면에서는 계산하지 않는다. 좌우 간격이 카메라 축 방향이라 원근으로 압축되고,
+     * 그 값으로 판정하면 "몸이 얼마나 정확히 측면을 향했는가"를 재게 된다.
+     */
+    @Test
+    fun `측면에서는 골반 쏠림을 판정하지 않는다`() {
+        val side = analyzer.analyze(sidePose(90f), aspect, CameraAngle.SIDE, featuresAt(90f))
+        assertNull(side.hipShiftRatio)
+    }
 }

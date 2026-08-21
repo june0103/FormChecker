@@ -14,7 +14,12 @@ enum class ThresholdOrigin {
     /** 설계문서에 적힌 값. 다만 실측으로 검증되지는 않았다. */
     DESIGN_DOC,
 
-    /** AI Hub 실측 분포로 확정된 값. */
+    /**
+     * 실측 분포로 확정된 값.
+     *
+     * 출처는 두 종류다 — AI Hub 라벨링 데이터, 그리고 **자체 수집한 기준 자세 데이터**.
+     * 후자가 더 믿을 만하다: 같은 모델·같은 기기로 찍었으므로 domain gap이 없다.
+     */
     DATA_DERIVED,
 
     /**
@@ -123,6 +128,31 @@ data class FormThresholds(
      */
     val torsoLeanLimitDegrees: Float = 45f,
 
+    /**
+     * 골반 좌우 쏠림 한계 `|hipCenter.x − ankleCenter.x| / 발목 간격`. 정면 전용.
+     *
+     * ## 자체 수집 데이터로 확정한 첫 임계값
+     * 정상 의도 9명 794프레임(최저점)의 분포다. **사람 간 변동이 사람 내 변동의 1.04배**로,
+     * 발목 간격으로 정규화한 이 값은 체형을 거의 완전히 지웠다 — 공통 임계값으로 쓸 수 있는
+     * 몇 안 되는 특징이다. (무릎 내측 이동은 절대값 2.4~4.3배, 선 자세 대비 변화량 3.8~5.9배,
+     * 스탠스 정규화 5.6배로 전부 실패했다.)
+     *
+     * | 백분위 | 값 |
+     * |---|---|
+     * | p50 | 0.018 |
+     * | p90 | 0.058 |
+     * | p95 | 0.068 |
+     * | p99 | 0.082 |
+     *
+     * 0.10은 정상 p99(0.082) 대비 약 1.2배 여유다. **오류 의도 세션이 없어 "오류를 잡는가"는
+     * 아직 검증되지 않았으므로** 오탐이 적은 쪽으로 잡았다. 사람별 p95의 최댓값이 0.082이므로
+     * 정상 표본은 거의 걸리지 않는다.
+     *
+     * 좌우 비대칭이 큰 두 세션(무릎 굴곡 좌우차 13~16°)은 분포에서 제외했다 — 정면인데 몸이
+     * 돌아갔거나 한쪽 다리 추정이 틀린 세션이다.
+     */
+    val hipShiftLimit: Float = 0.10f,
+
     /** 발 간격이 이보다 좁으면 무릎 정렬 비율이 불안정해 판정을 보류한다(정규화 좌표). */
     val minStanceWidth: Float = 0.04f,
 ) {
@@ -199,6 +229,8 @@ data class FormThresholds(
             "deepAngle" to ThresholdOrigin.DESIGN_DOC,
             "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             "torsoLeanLimitDegrees" to ThresholdOrigin.PROVISIONAL,
+            // 자체 수집 기준 데이터(정상 의도 9명 794프레임)로 확정.
+            "hipShiftLimit" to ThresholdOrigin.DATA_DERIVED,
             "minStanceWidth" to ThresholdOrigin.PROVISIONAL,
         )
 
