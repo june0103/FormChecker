@@ -3,7 +3,12 @@ package com.mist.formchecker.ui.screen.workout
 import android.app.Application
 import androidx.camera.core.CameraSelector
 import androidx.lifecycle.AndroidViewModel
+import android.os.Build
 import androidx.lifecycle.viewModelScope
+import com.mist.formchecker.data.CompletedRepInput
+import com.mist.formchecker.data.SessionMetricsInput
+import com.mist.formchecker.data.WorkoutRepository
+import com.mist.formchecker.poseengine.RepScorer
 import com.mist.formchecker.poseengine.AngleEma
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.CountingThresholds
@@ -11,6 +16,7 @@ import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FootSample
 import com.mist.formchecker.poseengine.FormCheck
+import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.KeypointType
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.MedianWindow
@@ -178,6 +184,7 @@ enum class CalibrationStage {
 @HiltViewModel
 class WorkoutViewModel @Inject constructor(
     application: Application,
+    private val repository: WorkoutRepository,
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(WorkoutUiState())
@@ -239,6 +246,34 @@ class WorkoutViewModel @Inject constructor(
      * 판정이, rep 요약에는 이쪽이 뜨는데 둘이 다른 기준을 쓰면 같은 rep을 다르게 읽는다.
      */
     private var repMaxShinDepth: Float? = null
+
+    // ── 세션 기록 ───────────────────────────────────────────
+
+    /** 이 화면에 들어온 시각. 세션의 `started_at`이다. */
+    private val sessionStartedAtMs = System.currentTimeMillis()
+
+    /**
+     * 완료한 rep을 쌓아 둔다. 종료 시 한 번에 저장한다.
+     *
+     * rep마다 즉시 쓰지 않는 이유: 운동 중에는 프레임 처리가 가장 바쁘고, rep 완료는 그
+     * 안에서 일어난다. 디스크 쓰기를 그 경로에 넣으면 추론 지연에 섞여 들어간다.
+     * 세션 하나는 수십 rep이라 메모리에 두기에 충분히 작다.
+     */
+    private val completedReps = mutableListOf<CompletedRepInput>()
+
+    /**
+     * 현재 rep 구간에서 한 번이라도 발생한 경고.
+     *
+     * **최저점 한 프레임만 보면 안 된다** — 상체 숙임은 실측에서 하강 최대(41.1°)가 최저점
+     * 최대(41.0°)보다 높았다. 구간 전체를 봐야 하강 중에만 나타난 경고를 놓치지 않는다.
+     */
+    private val repWarnings = mutableSetOf<FormWarning>()
+
+    /** 추론 지연 표본. p95를 내려면 EMA가 아니라 원표본이 필요하다. */
+    private val inferenceSamples = mutableListOf<Float>()
+
+    /** 분석에 성공한 프레임 수. `dropped_frame_ratio`의 분모다. */
+    private var analyzedFrameCount = 0
 
     // ── 기준 자세 ───────────────────────────────────────────
     /** 캘리브레이션 창에 모인 프레임. (pose, aspectRatio). */
@@ -351,10 +386,18 @@ class WorkoutViewModel @Inject constructor(
 
         // rep이 시작될 때 비우고 그 뒤로 최댓값을 쌓는다. 시작 프레임부터 모아야 하므로
         // 이벤트를 받은 직후에 처리한다.
+        analyzedFrameCount++
+        inferenceSamples += millis.toFloat()
+
         if (event is RepEvent.Started) {
             repMaxDepthRatio = null
             repMaxShinDepth = null
+            repWarnings.clear()
         }
+        // rep 구간 안이면 경고를 모은다. 선 자세·미인식 구간의 경고는 그 rep의 자세가
+        // 아니므로 넣지 않는다. Completed가 뜬 프레임은 이미 STANDING으로 넘어가 있지만,
+        // 그 직전 ASCENDING 프레임들이 이미 반영돼 있어 놓치는 것이 없다.
+        if (stateMachine.state in REP_PHASES) repWarnings += form.warnings
         form.depthRatio?.let { ratio ->
             repMaxDepthRatio = repMaxDepthRatio?.coerceAtLeast(ratio) ?: ratio
         }
@@ -371,6 +414,19 @@ class WorkoutViewModel @Inject constructor(
             stepCalibration(result)
         }
 
+        // rep 깊이는 상태와 저장이 같은 값을 써야 하므로 여기서 한 번만 계산한다.
+        // `_uiState.update`는 경합 시 재실행될 수 있어 부작용을 넣으면 안 된다.
+        val repDepth = repMaxDepthRatio?.let(config.form::depthLevelByRatio)
+            ?: repMaxShinDepth?.let(config.form::depthLevelByShinDepth)
+        val repDepthBasis = when {
+            repMaxDepthRatio != null -> DepthBasis.HIP_HEIGHT
+            repMaxShinDepth != null -> DepthBasis.SHIN_LENGTH
+            else -> null
+        }
+        if (event is RepEvent.Completed) {
+            recordCompletedRep(event.summary, repDepth, repDepthBasis)
+        }
+
         _uiState.update { state ->
             var next = state.copy(
                 result = result,
@@ -384,20 +440,8 @@ class WorkoutViewModel @Inject constructor(
                 is RepEvent.Completed -> next.copy(
                     repCount = state.repCount + 1,
                     lastRep = event.summary,
-                    // 깊이는 카운팅과 분리해 rep이 끝난 뒤 별도로 판정한다. 설계문서 3.2절의
-                    // 모순(BOTTOM < 100도 이면서 깊이부족 >= 120도)을 피하려면 이 두 판단이
-                    // 섞이지 않아야 한다.
-                    //
-                    // 무릎 각도로 대체하지 않는다 — 실측에서 각도 경로는 최저점을 전부 DEEP으로
-                    // 읽어 깊이 부족을 한 번도 잡지 못했다(FormThresholds.depthLevelByShinDepth).
-                    // 기준선이 없으면 정강이 정규화로 내려간다. 둘 다 없으면 판정하지 않는다.
-                    lastRepDepth = repMaxDepthRatio?.let(config.form::depthLevelByRatio)
-                        ?: repMaxShinDepth?.let(config.form::depthLevelByShinDepth),
-                    lastRepDepthBasis = when {
-                        repMaxDepthRatio != null -> DepthBasis.HIP_HEIGHT
-                        repMaxShinDepth != null -> DepthBasis.SHIN_LENGTH
-                        else -> null
-                    },
+                    lastRepDepth = repDepth,
+                    lastRepDepthBasis = repDepthBasis,
                     lastAbortReason = null,
                 )
                 is RepEvent.Aborted -> next.copy(lastAbortReason = event.reason)
@@ -405,6 +449,87 @@ class WorkoutViewModel @Inject constructor(
                 null -> next
             }
             next
+        }
+    }
+
+    // ── 세션 저장 ───────────────────────────────────────────
+
+    /**
+     * 완료한 rep을 저장 대기 목록에 넣는다.
+     *
+     * 깊이는 카운팅과 분리해 rep이 끝난 뒤 별도로 판정한다 — 설계문서 3.2절의 모순
+     * (BOTTOM < 100° 이면서 깊이부족 ≥ 120°)을 피하려면 두 판단이 섞이지 않아야 한다.
+     */
+    private fun recordCompletedRep(
+        summary: RepSummary,
+        depth: DepthLevel?,
+        basis: DepthBasis?,
+    ) {
+        val warnings = repWarnings.toSet()
+        // 깊이 경고는 프레임이 아니라 rep 최저점으로 판정한다. 프레임 단위 경고를 그대로
+        // 쓰면 하강 중 잠깐 SHALLOW였던 것이 남는데, 그건 지나가는 중이었을 뿐이다.
+        val repLevelWarnings = warnings.minus(FormWarning.SHALLOW_DEPTH) +
+            setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { depth == DepthLevel.SHALLOW })
+
+        completedReps += CompletedRepInput(
+            repNumber = summary.repIndex,
+            // rep이 방금 끝났으므로 지금 시각이 그 시각이다. summary의 타임스탬프는 프레임
+            // 단조 시계라 벽시계로 환산할 기준이 없다.
+            recordedAtMs = System.currentTimeMillis(),
+            durationMs = summary.durationMs,
+            cameraAngle = summary.cameraAngle.name,
+            score = RepScorer.score(
+                cameraAngle = summary.cameraAngle,
+                warnings = repLevelWarnings,
+                depthValue = repMaxDepthRatio ?: repMaxShinDepth,
+                depthBasis = basis,
+                thresholds = config.form,
+            ),
+            depthLevel = depth?.name,
+            depthBasis = basis?.name,
+            depthRatio = repMaxDepthRatio ?: repMaxShinDepth,
+            minKneeAngle = summary.aggregate.minKneeAngle,
+            maxTorsoLeanDegrees = summary.aggregate.maxTorsoLeanDegrees,
+            validFrameRatio = summary.aggregate.validFrameRatio,
+        )
+    }
+
+    /**
+     * 세션을 저장하고 id를 돌려준다. 운동 종료 버튼이 부른다.
+     *
+     * rep이 0개여도 저장한다 — "시작했지만 한 개도 못 셌다"는 것 자체가 기록이고, 그 세션이
+     * 사라지면 왜 카운터가 0이었는지 나중에 물어볼 대상이 없다.
+     */
+    fun finishSession(onSaved: (String) -> Unit) {
+        val state = _uiState.value
+        val samples = inferenceSamples.sorted()
+        val metrics = if (analyzedFrameCount > 0) {
+            SessionMetricsInput(
+                modelLoadMs = state.modelLoadMillis.takeIf { it > 0 },
+                avgInferenceMs = samples.average().toFloat(),
+                p95InferenceMs = samples[((samples.size - 1) * 95) / 100],
+                // 분모는 시도한 프레임 수다 — 성공 + 실패.
+                droppedFrameRatio = state.droppedFrames.toFloat() /
+                    (analyzedFrameCount + state.droppedFrames),
+                avgFps = state.analysisFps.toFloat(),
+                delegateType = state.activeDelegate?.name?.lowercase(),
+                analyzedFrameCount = analyzedFrameCount,
+            )
+        } else {
+            null
+        }
+
+        viewModelScope.launch {
+            val id = repository.saveSession(
+                startedAtMs = sessionStartedAtMs,
+                endedAtMs = System.currentTimeMillis(),
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                osVersion = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                poseModel = state.poseModel.label,
+                reps = completedReps.toList(),
+                metrics = metrics,
+            )
+            onSaved(id)
         }
     }
 
@@ -684,6 +809,11 @@ class WorkoutViewModel @Inject constructor(
     }
 
     private companion object {
+        /** rep 구간으로 취급하는 상태. 선 자세·미인식은 rep 밖이다. */
+        private val REP_PHASES = setOf(
+            RepState.DESCENDING, RepState.BOTTOM, RepState.ASCENDING,
+        )
+
         /**
          * 선 자세 유지 시간(ms). 수집 화면과 같은 값이다.
          *

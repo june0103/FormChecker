@@ -76,7 +76,11 @@ fun FormCheckerNavHost(
         }
 
         composable<History> {
-            HistoryScreen(onBack = { navController.popBackStack() })
+            HistoryScreen(
+                onBack = { navController.popBackStack() },
+                // 기록에서 열 때는 Workout을 걷어낼 필요가 없다 — 백스택에 없다.
+                onOpenSession = { navController.navigate(SessionSummary(it)) },
+            )
         }
 
         composable<Settings> {
