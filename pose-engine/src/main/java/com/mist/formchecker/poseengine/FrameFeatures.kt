@@ -67,6 +67,20 @@ data class FrameFeatures(
      */
     val leftMedialKneeDisplacement: Float?,
     val rightMedialKneeDisplacement: Float?,
+    /**
+     * 무릎–발끝 정렬 `(무릎 x − 발끝 x) / 발목 간격`. **양수 = 내측**. 좌/우. 정면 전용.
+     *
+     * ## 왜 이걸 따로 두는가
+     * 올바른 스쿼트는 무릎이 **발끝 방향으로** 내려간다. 안으로 말리는 것(valgus)과 과도하게
+     * 벌리는 것 **둘 다 오류**이므로 판정은 양방향이어야 하고, 기준점은 0이다 — 측정으로
+     * 정할 값이 아니라 정의다.
+     *
+     * 실측 11명 253 rep 최저점의 **중앙값이 0.0000**으로 그 정의가 확인됐다.
+     * [leftMedialKneeDisplacement]는 힙–발목 직선 기준이라 "바깥일수록 좋다"로 읽히고
+     * 기준점이 없다 — 정상 표본 전원이 −0.15~−0.46이었다.
+     */
+    val leftKneeToeDeviation: Float?,
+    val rightKneeToeDeviation: Float?,
     /** 골반 중심 좌우 이동 `(hipCenter.x − ankleCenter.x) / 발목 간격`. */
     val hipShiftRatio: Float?,
     /** 골반 기울기(도). 좌우 힙을 잇는 선과 수평축의 각. */
@@ -273,6 +287,32 @@ data class FrameFeatures(
                 return deviation * inwardSign / legLength
             }
 
+            /**
+             * 무릎–발끝 정렬. 무릎이 발끝 위에 있으면 0이다.
+             *
+             * 발끝 방향(heel→toe 각도)을 쓰지 않는 이유: 정면에서 그 벡터는 깊이축에 놓여
+             * 크게 단축되므로 각도를 신뢰할 수 없다(실측 좌우 상관이 −0.58 / +0.10으로
+             * 갈렸다). 대신 **발끝의 x 위치**를 직접 쓴다 — "무릎이 발끝 위"라는 규칙을
+             * 각도 없이 그대로 표현한다.
+             *
+             * 분모는 `legLength`가 아니라 발목 간격이다. 같은 정규화를 쓴 골반 쏠림이
+             * 사람 간 변동을 사람 내의 1.04배까지 지웠다.
+             */
+            fun kneeToeDeviation(side: Side): Float? {
+                if (!view.isFront) return null
+                if (ankleSpread == null || ankleSpread <= Geometry.EPSILON) return null
+                val knee = Geometry.knee(side)
+                if (!ok(knee)) return null
+                val toes = listOf(Geometry.bigToe(side), Geometry.smallToe(side))
+                    .filter { ok(it) }
+                    .map { p(it).first }
+                if (toes.isEmpty()) return null
+                val toeX = toes.average().toFloat()
+                // 정면에서 사람의 왼쪽은 화면 오른쪽이므로 내측 = 왼쪽은 x 감소.
+                val inwardSign = if (side == Side.LEFT) -1f else 1f
+                return (p(knee).first - toeX) * inwardSign / ankleSpread
+            }
+
             val hipShiftRatio = if (
                 view.isFront && hipCenter != null && ankleCenter != null &&
                 ankleSpread != null && ankleSpread > Geometry.EPSILON
@@ -339,6 +379,8 @@ data class FrameFeatures(
                 stanceWidthRatio = stanceWidthRatio,
                 leftMedialKneeDisplacement = medialKnee(Side.LEFT),
                 rightMedialKneeDisplacement = medialKnee(Side.RIGHT),
+                leftKneeToeDeviation = kneeToeDeviation(Side.LEFT),
+                rightKneeToeDeviation = kneeToeDeviation(Side.RIGHT),
                 hipShiftRatio = hipShiftRatio,
                 pelvisTilt = pelvisTilt,
                 shoulderTilt = shoulderTilt,

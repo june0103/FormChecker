@@ -153,6 +153,33 @@ data class FormThresholds(
      */
     val hipShiftLimit: Float = 0.10f,
 
+    /**
+     * 무릎–발끝 정렬 허용폭 `|무릎 x − 발끝 x| / 발목 간격`. 정면 전용.
+     *
+     * ## 기준점 0은 정의이고 허용폭만 데이터에서 나온다
+     * 올바른 스쿼트는 무릎이 발끝 방향으로 내려간다 — 그건 측정으로 정할 값이 아니다.
+     * 실측 11명 253 rep 최저점의 **중앙값이 0.0000**으로 그 정의가 확인됐다.
+     *
+     * 허용폭은 **사람내 MAD 0.0333의 3배**다. 사람내 MAD는 같은 사람이 같은 자세를 반복할
+     * 때의 흩어짐이므로, 자기 자세를 반복하는 범위는 통과한다.
+     *
+     * ## 왜 사람 간 분포에서 뽑지 않았나
+     * 사람별 중앙값이 −0.20~+0.18로 갈렸는데(사람 간 3.82배), 그건 정규화 실패가 아니라
+     * **일부 사람의 자세가 실제로 틀린 것**이다. 정상 의도로 찍어도 사람은 자기 자세가
+     * 정상이었는지 모른다. 그 분포에서 임계값을 뽑으면 오류가 정상 범위에 박힌다.
+     *
+     * ## ⚠ 미해결: 촬영 각도 오차와 구분되지 않는다
+     * 몸이 정면에서 살짝 돌아가면 무릎과 발끝이 서로 다른 깊이에 있어 x 투영이 다르게
+     * 밀리고, 실제보다 벌어져 보인다. 실측에서 |편차|와 어깨/힙 폭비의 상관이 +0.668이었고
+     * 촬영자도 한 명은 "살짝 틀어져서 더 그렇게 보인다"고 확인했다. **다만 그것이 yaw인지
+     * 체형인지 이 데이터로는 갈라지지 않는다.**
+     *
+     * 허용폭 자체는 그 영향을 받지 않는다 — yaw는 그 사람의 중심값을 밀지만 그 사람 안의
+     * 흩어짐은 바꾸지 않으므로, 사람내 MAD에서 뽑은 이 값은 yaw와 무관하다. 대신 **yaw가
+     * 큰 세션은 이 판정이 오탐을 낸다**는 점을 기억할 것.
+     */
+    val kneeToeToleranceRatio: Float = 0.10f,
+
     /** 발 간격이 이보다 좁으면 무릎 정렬 비율이 불안정해 판정을 보류한다(정규화 좌표). */
     val minStanceWidth: Float = 0.04f,
 ) {
@@ -202,6 +229,30 @@ data class FormThresholds(
      * @return 둘 중 하나라도 없으면 null (판정 불가). 기준선이 0에 가까우면 비율이
      *   불안정해지므로 판정하지 않는다.
      */
+    /**
+     * 무릎–발끝 정렬을 **프레임 단위**로 판정한다. 정면 전용.
+     *
+     * 기존 [kneeAlignmentOf]와 달리 선 자세 기준선이 필요 없다 — 기준점이 0이라는 것이
+     * 정의에서 나오기 때문이다. 그리고 양방향이다: 안으로 말리는 것과 과도하게 벌리는 것을
+     * 모두 잡는다.
+     *
+     * @param deviation `(무릎 x − 발끝 x) / 발목 간격`. 양수 = 내측.
+     */
+    fun kneeAlignmentByToe(deviation: Float?): KneeAlignment? = when {
+        deviation == null -> null
+        deviation > kneeToeToleranceRatio -> KneeAlignment.VALGUS
+        deviation < -kneeToeToleranceRatio -> KneeAlignment.FLARED
+        else -> KneeAlignment.GOOD
+    }
+
+    /**
+     * 무릎폭 증가 배수로 판정하는 기존 방식. **쓰지 않는다.**
+     *
+     * 실측 11명에서 정상 표본의 배수가 1.53~2.04였고 임계값이 1.1이므로 **아무것도 잡지
+     * 못한다**(통과율 100%). 게다가 사람 간 변동이 사람 내의 5.18배로 네 방식 중 가장
+     * 나빴다. [kneeAlignmentByToe]로 대체했고, 이 함수는 과거 데이터를 다시 계산할 때만
+     * 쓴다.
+     */
     fun kneeAlignmentOf(standingRatio: Float?, bottomRatio: Float?): KneeAlignment? {
         if (standingRatio == null || bottomRatio == null) return null
         if (standingRatio < MIN_BASELINE_RATIO) return null
@@ -231,6 +282,8 @@ data class FormThresholds(
             "torsoLeanLimitDegrees" to ThresholdOrigin.PROVISIONAL,
             // 자체 수집 기준 데이터(정상 의도 9명 794프레임)로 확정.
             "hipShiftLimit" to ThresholdOrigin.DATA_DERIVED,
+            // 기준점 0은 정의, 허용폭은 사람내 MAD(11명 253 rep)에서 나왔다.
+            "kneeToeToleranceRatio" to ThresholdOrigin.DATA_DERIVED,
             "minStanceWidth" to ThresholdOrigin.PROVISIONAL,
         )
 
