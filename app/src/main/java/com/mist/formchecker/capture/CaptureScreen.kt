@@ -34,13 +34,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mist.formchecker.poseengine.CaptureIntent
 import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CaptureRep
 import com.mist.formchecker.poseengine.CaptureView
 import com.mist.formchecker.poseengine.Footwear
-import com.mist.formchecker.poseengine.CaptureIntent
 import com.mist.formchecker.poseengine.RepOutliers
 import com.mist.formchecker.poseengine.StandingCalibration
 import com.mist.formchecker.ui.screen.workout.CameraPreview

@@ -1,12 +1,9 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# IDE 설정은 전부 로컬로 둔다. Android Studio 기본값은 일부를 공유하게 돼 있지만
+# deploymentTargetSelector.xml·deviceManager.xml에 사용자 기기 식별자가 들어간다.
+/.idea/
 .DS_Store
 /build
 /captures
