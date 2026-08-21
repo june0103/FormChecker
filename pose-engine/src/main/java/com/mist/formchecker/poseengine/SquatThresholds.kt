@@ -51,15 +51,6 @@ enum class ThresholdOrigin {
  * 없는 설정이 되므로 두지 않는다.)
  */
 data class FormThresholds(
-    /** 이 각도보다 크면 서 있는 것으로 본다. */
-    val standingAngle: Float = 160f,
-
-    /** 이 각도 이상이면 깊이 부족. */
-    val shallowAngle: Float = 120f,
-
-    /** 이 각도 미만이면 충분히 깊게 앉은 것으로 본다. */
-    val deepAngle: Float = 100f,
-
     // ── 깊이: 엉덩이 높이 기준 (기준선이 있을 때) ───────────
     //
     // `depth_ratio = (hip.y − knee.y) / legLength`. 화면 y는 아래로 증가하므로 힙이
@@ -68,9 +59,24 @@ data class FormThresholds(
     /**
      * 이 값 이하면 아직 서 있는 것으로 본다.
      *
-     * 선 자세는 힙이 무릎보다 대퇴 하나만큼 위이므로 `-대퇴/다리 ≈ -0.5`다. 실측
-     * 앱 −0.51~−0.53, 수집 데이터 하강 0~20% 구간 p50 −0.479 / p95 −0.442였다.
-     * −0.40은 그 구간을 확실히 벗어난 지점이다.
+     * 선 자세는 힙이 무릎보다 대퇴 하나만큼 위이므로 `-대퇴/다리 ≈ -0.5`다.
+     *
+     * ## 실측으로 확정 (측면 3세션 / 3명 / READY 753프레임)
+     *
+     * | 구간 | p50 | p95 | p99 | 최대 |
+     * |---|---|---|---|---|
+     * | 선 자세(READY) | −0.498 | −0.460 | −0.443 | **−0.429** |
+     * | 하강 0~20% | −0.481 | −0.442 | — | — |
+     *
+     * 사람별 READY 최대가 −0.450 / −0.429 / −0.470이므로 −0.40은 세 사람 전부에서
+     * 선 자세를 **0% 오분류**한다. 여유 0.029는 프레임 간 깊이비 지터(최악 0.0062)의
+     * 약 4.7배다. −0.42까지 올려도 오분류는 0%지만 여유가 0.009로 지터의 1.5배뿐이라
+     * 두지 않았다.
+     *
+     * ## ⚠ 반대쪽은 검증되지 않았다
+     * 이 값이 너무 관대하면 **얕은 스쿼트가 STANDING으로 읽혀 경고가 나가지 않는다.**
+     * 실측 44 rep의 최저점이 −0.118~+0.177로 전부 −0.40보다 깊어, "얕은 rep을 놓치지
+     * 않는가"는 이 데이터로 확인할 수 없다. 의도적으로 얕게 앉은 세션이 필요하다.
      */
     val standingDepthRatio: Float = -0.40f,
 
@@ -87,11 +93,59 @@ data class FormThresholds(
     /**
      * 이 값 이상이면 충분히 깊게 앉은 것으로 본다.
      *
-     * 실측 두 사람의 최저점이 −0.026과 +0.060이었다. 한 명은 패럴렐에 못 미치고 한 명은
-     * 확실히 넘었다는 뜻이므로 그 사이에 두었지만, **표본 2명으로 정한 값이다.**
-     * 기준 데이터가 모이면 `reference_range.csv`의 최저점 백분위수로 교체할 것.
+     * ## 허용폭과 같은 값이다 — 자유 변수가 아니다
+     * PARALLEL은 "대퇴 수평(0) ± 측정 오차"인 구간이고, 그 폭은 [parallelToleranceRatio]로
+     * 이미 정해져 있다. 그러면 그 구간을 벗어나 확실히 내려간 지점이 DEEP이므로 경계는
+     * `+허용폭`이다. 이전 값 0.05는 허용폭 0.03과 달라 `[−0.03, +0.05)`라는 비대칭
+     * 구간을 만들었는데, **그 비대칭에 근거가 없었다.**
+     *
+     * ## 실측 분포로는 정할 수 없다
+     * 측면 3세션 42 rep의 최저점 중앙값이 사람별로 −0.043 / +0.046 / +0.149로 갈렸다.
+     * 사람 간 MAD가 사람 내의 **8.27배**로, 폐기된 [valgusSpreadGain]의 5.18배보다 나쁘다.
+     *
+     * 다만 이건 정규화 실패가 **아니다.** 깊이비는 `depth_ratio = 0`이 패럴렐이라는 정의로
+     * 고정돼 있어 체형이 들어올 자리가 없다 — 세 사람이 실제로 다른 깊이까지 앉은 것이다
+     * (한 명은 패럴렐에 못 미쳤다). 그래서 개인 기준선으로 보정할 대상도 아니다. "정상
+     * 의도"로 찍은 분포에서 경계를 뽑으면 못 앉은 사람의 깊이가 정상 범위로 들어간다.
+     *
+     * ## 이 경계는 경고를 바꾸지 않는다
+     * DEEP과 PARALLEL 둘 다 경고가 없다 ([SquatFormAnalyzer]의 `warningsOf`는 SHALLOW만
+     * 본다). 화면 표시가 "충분"인지 "적정"인지만 달라진다. 사용자에게 영향을 주는 경계는
+     * SHALLOW/PARALLEL, 즉 `−`[parallelToleranceRatio] 쪽이다.
      */
-    val deepDepthRatio: Float = 0.05f,
+    val deepDepthRatio: Float = parallelToleranceRatio,
+
+    // ── 깊이: 정강이 길이 기준 (기준선이 없을 때) ───────────
+    //
+    // `shinDepthRatio = (hip.y − knee.y) / (ankle.y − knee.y)`. 분자는 [standingDepthRatio]
+    // 쪽과 같고 **분모만 다르다** — 같은 프레임의 정강이 길이로 나누므로 캘리브레이션이
+    // 필요 없다. 무릎–발끝 게이트([kneeToeMinDepth])가 쓰는 것과 같은 정규화다.
+
+    /**
+     * 정강이 기준으로 "아직 서 있음"을 판정하는 경계. [standingDepthRatio]의 환산값이다.
+     *
+     * 환산 계수는 `legLength / tibiaLength`다. 실측 3명이 2.075 / 2.018 / 2.100으로
+     * 폭 4%였고, 중앙 2.075를 쓰면 `−0.40 × 2.075 = −0.83`이다.
+     *
+     * 실측 READY 753프레임의 최대가 −0.932이므로 −0.83은 **0% 오분류**이고 여유가 0.10이다.
+     * 독립적으로 정해진 [kneeToeMinDepth]가 −0.8인 것과 거의 같은 자리에 놓인다 — 두
+     * 임계값이 같은 것("확실히 앉기 시작한 지점")을 재고 있으므로 일치하는 것이 맞다.
+     */
+    val standingShinDepth: Float = -0.83f,
+
+    /**
+     * 정강이 기준 패럴렐 허용폭. [parallelToleranceRatio]의 환산값 `0.03 × 2.075`다.
+     *
+     * ## 경계 0은 환산이 필요 없다
+     * 두 비율은 분자가 같고 분모가 둘 다 양수이므로 **부호가 항상 일치한다.** 즉
+     * `shinDepthRatio ≥ 0`과 `depthRatio ≥ 0`은 같은 조건이고, 패럴렐 경계는 환산 오차
+     * 없이 그대로 넘어온다. 실측 2636프레임에서 두 비율의 상관이 사람별 +0.9901~+0.9962,
+     * 부호 일치율이 98.99~100%였고, 어긋난 10프레임은 `|depth_ratio|` 중앙 0.0055로
+     * 전부 허용폭 안이었다.
+     *
+     * 환산이 필요한 것은 **폭**뿐이고, 그 계수가 사람마다 4%밖에 안 흔들린다.
+     */
+    val parallelShinTolerance: Float = 0.062f,
 
     /**
      * 최저점의 무릎폭/발목폭이 **선 자세 기준선의 이 배수 미만**이면 valgus로 본다.
@@ -218,19 +272,6 @@ data class FormThresholds(
     val minStanceWidth: Float = 0.04f,
 ) {
     /**
-     * 무릎 각도를 깊이 단계로 분류한다.
-     *
-     * 분류 규칙을 [DepthLevel]이 아니라 임계값 쪽에 둔 이유: 경계값이 바뀌면 분류도
-     * 함께 바뀌어야 하는데, 둘이 떨어져 있으면 한쪽만 고치는 실수가 생긴다.
-     */
-    fun depthLevelOf(kneeAngle: Float): DepthLevel = when {
-        kneeAngle > standingAngle -> DepthLevel.STANDING
-        kneeAngle >= shallowAngle -> DepthLevel.SHALLOW
-        kneeAngle >= deepAngle -> DepthLevel.PARALLEL
-        else -> DepthLevel.DEEP
-    }
-
-    /**
      * 엉덩이 높이로 깊이를 판정한다. 기준선이 있을 때 쓴다.
      *
      * ## 왜 무릎 각도가 아닌가
@@ -249,6 +290,41 @@ data class FormThresholds(
         depthRatio <= standingDepthRatio -> DepthLevel.STANDING
         depthRatio >= deepDepthRatio -> DepthLevel.DEEP
         depthRatio >= -parallelToleranceRatio -> DepthLevel.PARALLEL
+        else -> DepthLevel.SHALLOW
+    }
+
+    /**
+     * 정강이 길이로 깊이를 판정한다. **기준선이 없을 때의 대체 경로다.**
+     *
+     * ## 무릎 각도 경로를 이것으로 교체했다
+     * 이전 대체 경로는 무릎 관절각을 `160/120/100°`로 잘랐다. 측면 실측 3세션에서 그
+     * 경로는 깊이비 경로와 **45~67%만 일치**했고, 불일치의 대부분이 한 방향이었다:
+     *
+     * | 깊이비 판정 | 각도 판정 | 프레임 |
+     * |---|---|---|
+     * | SHALLOW | **DEEP** | 503 |
+     * | STANDING | SHALLOW | 311 |
+     * | SHALLOW | PARALLEL | 259 |
+     *
+     * 세 사람의 최저점 관절각이 74.4° / 57.6° / 51.2°로 전부 `deepAngle`(100°) 미만이라
+     * **세 사람 모두 DEEP으로 읽혔다** — 한 명은 패럴렐에 닿지도 못했는데(깊이비 중앙
+     * −0.043) 경고가 나가지 않았다. 즉 각도 경로에서 `SHALLOW_DEPTH`는 발화하지 않는다.
+     *
+     * ## 각도로는 고칠 수 없다 (정강이 기울기 교란)
+     * 관절각이 패럴렐에 대응하는 지점은 정강이가 얼마나 앞으로 기우는지에 달렸다. 실측
+     * 3명에서 그 교차점이 65.4~72.3°였지만, 정강이가 수직이면 90°가 된다. 오탐을 0으로
+     * 만들려면 경계를 90° 위로 둬야 하고, 그러면 다시 아무것도 잡지 못한다. **각도는
+     * 깊이의 대리 변수가 될 수 없다.**
+     *
+     * 정강이 정규화는 그 문제가 없다 — 세로 거리만 쓰고, 패럴렐 경계가 부호로 정의되므로
+     * 환산 오차 없이 넘어온다 ([parallelShinTolerance] 참고).
+     *
+     * @param shinDepth `(hip.y − knee.y) / (ankle.y − knee.y)`. 힙이 무릎보다 위면 음수.
+     */
+    fun depthLevelByShinDepth(shinDepth: Float): DepthLevel = when {
+        shinDepth <= standingShinDepth -> DepthLevel.STANDING
+        shinDepth >= parallelShinTolerance -> DepthLevel.DEEP
+        shinDepth >= -parallelShinTolerance -> DepthLevel.PARALLEL
         else -> DepthLevel.SHALLOW
     }
 
@@ -301,17 +377,20 @@ data class FormThresholds(
         /**
          * 각 값의 출처. 데이터 측 확정값이 오면 여기가 [ThresholdOrigin.DATA_DERIVED]로 바뀐다.
          *
-         * `standingAngle`/`shallowAngle`/`deepAngle`은 설계문서 3.2절에 적힌 값이지만
-         * 실측 검증을 거치지 않았고, 나머지는 근거 없이 정한 값이다.
+         * 각도 기준 깊이 임계값(`standingAngle`/`shallowAngle`/`deepAngle`)은 설계문서
+         * 3.2절의 값이었지만 실측에서 `SHALLOW_DEPTH`를 전혀 발화시키지 못해 제거했다
+         * ([depthLevelByShinDepth] 주석 참고).
          */
         val ORIGINS: Map<String, ThresholdOrigin> = mapOf(
-            "standingAngle" to ThresholdOrigin.DESIGN_DOC,
-            "shallowAngle" to ThresholdOrigin.DESIGN_DOC,
-            // 깊이 비율 기준. 패럴렐 경계만 정의에서 나오고 나머지는 실측이 필요하다.
-            "standingDepthRatio" to ThresholdOrigin.PROVISIONAL,
+            // 깊이 — 엉덩이 높이 기준(기준선 있음). 측면 3세션 / 3명 / 44 rep으로 확정.
+            "standingDepthRatio" to ThresholdOrigin.DATA_DERIVED,
             "parallelToleranceRatio" to ThresholdOrigin.DEFINITION,
-            "deepDepthRatio" to ThresholdOrigin.PROVISIONAL,
-            "deepAngle" to ThresholdOrigin.DESIGN_DOC,
+            // 허용폭과 같은 값이다. 실측 분포로는 정할 수 없고(사람 간 8.27배) 정할 필요도
+            // 없다 — DEEP/PARALLEL은 경고를 바꾸지 않는다.
+            "deepDepthRatio" to ThresholdOrigin.DEFINITION,
+            // 깊이 — 정강이 기준(기준선 없음). 위 두 값의 환산이고 계수는 실측 3명 2.018~2.100.
+            "standingShinDepth" to ThresholdOrigin.DATA_DERIVED,
+            "parallelShinTolerance" to ThresholdOrigin.DEFINITION,
             "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             "torsoLeanLimitDegrees" to ThresholdOrigin.PROVISIONAL,
             // 자체 수집 기준 데이터(정상 의도 9명 794프레임)로 확정.
@@ -383,8 +462,10 @@ data class CountingThresholds(
     /**
      * 이 각도 아래로 내려가야 rep 시도로 인정한다.
      *
-     * **자세 판정용 [FormThresholds.deepAngle]보다 관대해야 한다.** 얕은 스쿼트도 동작
-     * 자체는 카운트하기 위함이다.
+     * **자세 판정보다 관대해야 한다.** 얕은 스쿼트도 동작 자체는 카운트하고, 깊이 부족은
+     * 경고로 따로 알린다. 자세 판정은 각도를 아예 쓰지 않는다
+     * ([FormThresholds.depthLevelByShinDepth] 참고) — 여기서만 각도를 쓰는 이유는 카운팅이
+     * 재는 것이 "움직였는가"이지 "얼마나 깊은가"가 아니기 때문이다.
      */
     val repBottomAngle: Float = 130f,
 

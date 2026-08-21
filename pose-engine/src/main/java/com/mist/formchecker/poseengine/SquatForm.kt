@@ -4,8 +4,8 @@ package com.mist.formchecker.poseengine
  * 스쿼트 깊이 단계.
  *
  * 각 단계의 경계값은 이 enum이 아니라 [FormThresholds]가 가지고 있다
- * ([FormThresholds.depthLevelOf]). 임계값 결정은 데이터·모델 담당 영역이라
- * 앱 코드에 상수로 박아두지 않는다.
+ * ([FormThresholds.depthLevelByRatio]·[FormThresholds.depthLevelByShinDepth]).
+ * 임계값 결정은 데이터·모델 담당 영역이라 앱 코드에 상수로 박아두지 않는다.
  */
 enum class DepthLevel {
     /** 서 있음. */
@@ -29,11 +29,22 @@ enum class DepthLevel {
  * 사라질 때 판정이 조용히 바뀌고, 그건 리포트에서 원인을 찾을 수 없는 종류의 변화다.
  */
 enum class DepthBasis {
-    /** 무릎 각도. 기준선이 없을 때의 대체 경로다. */
-    KNEE_ANGLE,
-
-    /** 엉덩이 높이 비율. 기준선이 있을 때 쓰며, 패럴렐 경계가 정의에서 나온다. */
+    /**
+     * 엉덩이 높이 ÷ 다리 길이. 기준선이 있을 때 쓰며, 패럴렐 경계가 정의에서 나온다.
+     *
+     * 기준선의 다리 길이는 캘리브레이션 80여 프레임의 중앙값이라 프레임 단위 지터가 없다.
+     * 그래서 둘 다 쓸 수 있으면 이쪽이 우선이다.
+     */
     HIP_HEIGHT,
+
+    /**
+     * 엉덩이 높이 ÷ 정강이 길이. **기준선이 없을 때의 대체 경로다.**
+     *
+     * 같은 프레임의 정강이로 나누므로 캘리브레이션이 필요 없다. [HIP_HEIGHT]와 분자가
+     * 같고 분모만 다르므로 패럴렐 경계(부호)는 동일하고 허용폭만 환산된다
+     * ([FormThresholds.parallelShinTolerance]).
+     */
+    SHIN_LENGTH,
 }
 
 /**

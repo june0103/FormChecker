@@ -105,10 +105,18 @@ class RepStateMachineTest {
 
         assertEquals("얕아도 rep으로 센다", 1, machine.completedReps)
 
-        // 깊이 부족은 상태머신이 아니라 FormThresholds가 판정한다
+        // 깊이 부족은 상태머신이 아니라 FormThresholds가 판정한다.
+        //
+        // 상태머신이 모으는 `minKneeAngle`로는 깊이를 판정할 수 없다 — 실측에서 최저점
+        // 관절각 74°/58°/51°가 전부 같은 단계로 읽혀 얕은 rep을 구분하지 못했다
+        // (FormThresholds.depthLevelByShinDepth). 그래서 깊이는 별도 신호로 판정한다.
         val summary = events.filterIsInstance<RepEvent.Completed>().single().summary
-        val depth = FormThresholds().depthLevelOf(summary.aggregate.minKneeAngle!!)
-        assertEquals(DepthLevel.SHALLOW, depth)
+        assertNotNull("rep 요약은 최저 각도를 남긴다", summary.aggregate.minKneeAngle)
+        assertEquals(
+            "P001 실측 최저점(정강이 기준 −0.242)은 깊이 부족이다",
+            DepthLevel.SHALLOW,
+            FormThresholds().depthLevelByShinDepth(-0.242f),
+        )
     }
 
     @Test

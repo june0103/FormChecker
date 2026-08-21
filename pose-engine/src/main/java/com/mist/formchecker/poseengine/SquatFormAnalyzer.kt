@@ -25,9 +25,10 @@ class SquatFormAnalyzer(
     private val minConfidence get() = config.minConfidence
 
     /**
-     * @param features 선 자세 기준선으로 정규화한 특징. 있으면 **깊이와 상체 숙임을 이쪽으로
-     *   판정한다.** 없으면 각도 기준으로 대체한다 — 기준선이 없다고 카운팅과 피드백이 모두
-     *   멈추면 얻는 것 없이 운동만 끊긴다.
+     * @param features 프레임 특징. 깊이와 상체 숙임은 **여기서만** 나온다 — 무릎 각도로는
+     *   깊이를 판정하지 않는다([FormThresholds.depthLevelByShinDepth] 주석의 실측 근거).
+     *   선 자세 기준선이 있으면 다리 길이로, 없으면 정강이 길이로 정규화한 값을 쓴다.
+     *   기준선이 없다고 판정이 멈추지는 않는다 — 정강이 정규화에는 기준선이 필요 없다.
      */
     fun analyze(
         pose: Pose,
@@ -41,9 +42,15 @@ class SquatFormAnalyzer(
         // 지원 각도가 아니면 계산하지 않는다.
         val depthSupported = cameraAngle.supports(FormCheck.DEPTH)
         val depthRatio = features?.depthRatio?.takeIf { depthSupported }
+        val shinDepthRatio = features?.shinDepthRatio?.takeIf { depthSupported }
 
-        // 기준선이 있으면 엉덩이 높이로 판정한다. 패럴렐 경계가 정의에서 나오기 때문이다
-        // (FormThresholds.depthLevelByRatio 참고). 없으면 각도로 대체한다.
+        // 두 경로 다 엉덩이 높이를 재고 분모만 다르다. 기준선이 있으면 다리 길이(캘리브레이션
+        // 중앙값이라 지터가 없다), 없으면 같은 프레임의 정강이 길이를 쓴다.
+        //
+        // 무릎 각도로 대체하지 않는다 — 실측 3세션에서 각도 경로는 최저점을 세 사람 모두
+        // DEEP으로 읽어 SHALLOW_DEPTH가 아예 발화하지 않았다. 패럴렐에 대응하는 관절각이
+        // 정강이 기울기에 따라 65~90°로 움직이기 때문이고, 임계값을 다시 골라도 고쳐지지
+        // 않는다 (FormThresholds.depthLevelByShinDepth 주석의 실측 표 참고).
         val depth: DepthLevel?
         val depthBasis: DepthBasis?
         when {
@@ -51,9 +58,9 @@ class SquatFormAnalyzer(
                 depth = form.depthLevelByRatio(depthRatio)
                 depthBasis = DepthBasis.HIP_HEIGHT
             }
-            depthSupported -> {
-                depth = knees.representative?.let(form::depthLevelOf)
-                depthBasis = depth?.let { DepthBasis.KNEE_ANGLE }
+            shinDepthRatio != null -> {
+                depth = form.depthLevelByShinDepth(shinDepthRatio)
+                depthBasis = DepthBasis.SHIN_LENGTH
             }
             else -> {
                 depth = null
@@ -88,9 +95,9 @@ class SquatFormAnalyzer(
         // 이동해야 커지므로, **무릎을 모으는 오류가 게이트 신호를 억제한다**. 깊이는
         // 세로 거리만 쓰므로 무릎의 좌우 이동과 무관하다
         // (FormThresholds.kneeToeMinDepth 주석의 실측 표 참고).
-        val shinDepth = features?.shinDepthRatio
+        val gateDepth = features?.shinDepthRatio
         val kneeToeJudgeable = cameraAngle.supports(FormCheck.KNEE_ALIGNMENT) &&
-            shinDepth != null && shinDepth >= form.kneeToeMinDepth
+            gateDepth != null && gateDepth >= form.kneeToeMinDepth
         val kneeToeDeviation = if (kneeToeJudgeable) {
             listOfNotNull(features?.leftKneeToeDeviation, features?.rightKneeToeDeviation)
                 .maxByOrNull { abs(it) }

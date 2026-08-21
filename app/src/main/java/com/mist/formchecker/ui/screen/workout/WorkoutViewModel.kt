@@ -232,6 +232,14 @@ class WorkoutViewModel @Inject constructor(
      */
     private var repMaxDepthRatio: Float? = null
 
+    /**
+     * 같은 것을 정강이 길이로 정규화한 값. 기준선이 없을 때 쓴다.
+     *
+     * 프레임 판정([SquatFormAnalyzer])과 같은 순서로 대체해야 한다 — 화면에는 프레임
+     * 판정이, rep 요약에는 이쪽이 뜨는데 둘이 다른 기준을 쓰면 같은 rep을 다르게 읽는다.
+     */
+    private var repMaxShinDepth: Float? = null
+
     // ── 기준 자세 ───────────────────────────────────────────
     /** 캘리브레이션 창에 모인 프레임. (pose, aspectRatio). */
     private val calibrationFrames = mutableListOf<Pair<Pose, Float>>()
@@ -343,9 +351,18 @@ class WorkoutViewModel @Inject constructor(
 
         // rep이 시작될 때 비우고 그 뒤로 최댓값을 쌓는다. 시작 프레임부터 모아야 하므로
         // 이벤트를 받은 직후에 처리한다.
-        if (event is RepEvent.Started) repMaxDepthRatio = null
+        if (event is RepEvent.Started) {
+            repMaxDepthRatio = null
+            repMaxShinDepth = null
+        }
         form.depthRatio?.let { ratio ->
             repMaxDepthRatio = repMaxDepthRatio?.coerceAtLeast(ratio) ?: ratio
+        }
+        // 깊이를 지원하는 각도에서만 모은다 — 정면 값은 원근 왜곡으로 믿을 수 없다.
+        if (form.cameraAngle.supports(FormCheck.DEPTH)) {
+            features?.shinDepthRatio?.let { ratio ->
+                repMaxShinDepth = repMaxShinDepth?.coerceAtLeast(ratio) ?: ratio
+            }
         }
 
         // 카운팅과 독립적으로 돌린다. 기준선을 재는 중에도 rep은 세어져야 한다 — 사용자가
@@ -367,17 +384,18 @@ class WorkoutViewModel @Inject constructor(
                 is RepEvent.Completed -> next.copy(
                     repCount = state.repCount + 1,
                     lastRep = event.summary,
-                    // 깊이는 카운팅과 분리해 rep이 끝난 뒤 최저 각도로 별도 판정한다.
-                    // 설계문서 3.2절의 모순(BOTTOM < 100도 이면서 깊이부족 >= 120도)을
-                    // 피하려면 이 두 판단이 섞이지 않아야 한다.
-                    // 기준선이 있으면 엉덩이 높이로 판정한다 — 패럴렐 경계가 정의에서
-                    // 나오므로 사람마다 달라지지 않는다. 없으면 각도로 대체한다.
+                    // 깊이는 카운팅과 분리해 rep이 끝난 뒤 별도로 판정한다. 설계문서 3.2절의
+                    // 모순(BOTTOM < 100도 이면서 깊이부족 >= 120도)을 피하려면 이 두 판단이
+                    // 섞이지 않아야 한다.
+                    //
+                    // 무릎 각도로 대체하지 않는다 — 실측에서 각도 경로는 최저점을 전부 DEEP으로
+                    // 읽어 깊이 부족을 한 번도 잡지 못했다(FormThresholds.depthLevelByShinDepth).
+                    // 기준선이 없으면 정강이 정규화로 내려간다. 둘 다 없으면 판정하지 않는다.
                     lastRepDepth = repMaxDepthRatio?.let(config.form::depthLevelByRatio)
-                        ?: event.summary.aggregate.minKneeAngle
-                            ?.let(config.form::depthLevelOf),
+                        ?: repMaxShinDepth?.let(config.form::depthLevelByShinDepth),
                     lastRepDepthBasis = when {
                         repMaxDepthRatio != null -> DepthBasis.HIP_HEIGHT
-                        event.summary.aggregate.minKneeAngle != null -> DepthBasis.KNEE_ANGLE
+                        repMaxShinDepth != null -> DepthBasis.SHIN_LENGTH
                         else -> null
                     },
                     lastAbortReason = null,
@@ -587,6 +605,7 @@ class WorkoutViewModel @Inject constructor(
         lastFrameTimestampMs = null
         // 진행 중이던 rep의 깊이를 다음 rep으로 흘리지 않는다.
         repMaxDepthRatio = null
+        repMaxShinDepth = null
     }
 
     private fun onFrameDropped() {

@@ -57,11 +57,28 @@ class SquatFormAnalyzerTest {
         KeypointType.RIGHT_ANKLE to Triple(0.51f, 0.9f, 0.9f),
     )
 
+    /**
+     * 기준선 없이 계산한 특징. 깊이는 특징에서만 나오므로 판정 항목을 확인하는 테스트도
+     * 특징을 넘겨야 한다 — 무릎 각도 대체 경로는 없앴다
+     * ([FormThresholds.depthLevelByShinDepth] 주석 참고).
+     */
+    private fun featuresOf(pose: Pose, view: CaptureView, side: Side) = FrameFeatures.from(
+        pose = pose,
+        aspectRatio = 0.75f,
+        calibration = null,
+        view = view,
+        activeSide = side,
+    )
+
     // ── 각도별 판정 항목 켜고 끄기 ──────────────────────────────
 
     @Test
     fun `측면에서는 깊이와 상체 기울기만 판정한다`() {
-        val form = analyzer.analyze(sideFacing(), 0.75f, CameraAngle.SIDE)
+        val pose = sideFacing()
+        val form = analyzer.analyze(
+            pose, 0.75f, CameraAngle.SIDE,
+            featuresOf(pose, CaptureView.SIDE_LEFT, Side.LEFT),
+        )
 
         assertNotNull("깊이는 측면에서 판정한다", form.depth)
         assertNotNull("상체 기울기는 측면에서 판정한다", form.torsoLeanDegrees)
@@ -79,13 +96,21 @@ class SquatFormAnalyzerTest {
 
     // ── 깊이 ──────────────────────────────────────────────────
 
+    /**
+     * 경계는 전부 실측값으로 고정한다. 각 값이 어느 사람의 어느 구간에서 나왔는지 남겨야
+     * 임계값이 바뀔 때 무엇이 깨진 것인지 알 수 있다.
+     */
     @Test
-    fun `무릎 각도에 따라 깊이 단계가 나뉜다`() {
+    fun `정강이 기준으로 깊이 단계가 나뉜다`() {
         val t = FormThresholds()
-        assertEquals(DepthLevel.STANDING, t.depthLevelOf(175f))
-        assertEquals(DepthLevel.SHALLOW, t.depthLevelOf(140f))
-        assertEquals(DepthLevel.PARALLEL, t.depthLevelOf(110f))
-        assertEquals(DepthLevel.DEEP, t.depthLevelOf(85f))
+        // 측면 3세션 READY 753프레임 중앙값
+        assertEquals(DepthLevel.STANDING, t.depthLevelByShinDepth(-1.087f))
+        // P001 최저점 p5 — 패럴렐에 닿지 못한 rep이다
+        assertEquals(DepthLevel.SHALLOW, t.depthLevelByShinDepth(-0.242f))
+        // 대퇴 수평. 부호로 정의되므로 환산 오차가 없다
+        assertEquals(DepthLevel.PARALLEL, t.depthLevelByShinDepth(0f))
+        // P008 최저점 중앙값
+        assertEquals(DepthLevel.DEEP, t.depthLevelByShinDepth(0.339f))
     }
 
     /**
@@ -94,12 +119,12 @@ class SquatFormAnalyzerTest {
      */
     @Test
     fun `깊이 경계값을 주입하면 분류가 달라진다`() {
-        // 목표 깊이를 더 깊게 요구하는 설정 (deepAngle을 60°까지 내림)
-        val strict = FormThresholds(standingAngle = 150f, shallowAngle = 90f, deepAngle = 60f)
+        // 허용폭을 좁힌 설정. 같은 +0.04가 기본에서는 "허용폭 안"이라 PARALLEL,
+        // 엄격한 설정에서는 허용폭을 넘어 DEEP이 된다.
+        val strict = FormThresholds(parallelShinTolerance = 0.02f)
 
-        // 같은 95°가 기본 설정에서는 "충분히 깊음", 엄격한 설정에서는 "깊이 부족"이 된다.
-        assertEquals(DepthLevel.DEEP, FormThresholds().depthLevelOf(95f))
-        assertEquals(DepthLevel.SHALLOW, strict.depthLevelOf(95f))
+        assertEquals(DepthLevel.PARALLEL, FormThresholds().depthLevelByShinDepth(0.04f))
+        assertEquals(DepthLevel.DEEP, strict.depthLevelByShinDepth(0.04f))
     }
 
     @Test
