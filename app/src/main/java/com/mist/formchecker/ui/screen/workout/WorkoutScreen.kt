@@ -330,7 +330,7 @@ private fun HudBottomBand(
             )
         }
 
-        form?.warnings?.forEach { FormWarningRow(it) }
+        form?.warnings?.forEach { FormWarningRow(it, side = form.kneeToeSide) }
 
         val angle = knees?.representative
         Text(
@@ -592,8 +592,17 @@ private fun AngleMismatchNotice(
     }
 }
 
+/**
+ * @param side 무릎 경고에 붙일 쪽(사람 기준). "무릎을 벌려주세요"보다 "왼쪽 무릎을
+ *   벌려주세요"가 실행 가능한 지시다. 무릎 경고가 아니면 무시한다 — 깊이·상체·골반은
+ *   양쪽을 함께 보는 판정이라 쪽이 없다.
+ */
 @Composable
-private fun FormWarningRow(warning: FormWarning, modifier: Modifier = Modifier) {
+private fun FormWarningRow(
+    warning: FormWarning,
+    side: Side? = null,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -606,7 +615,7 @@ private fun FormWarningRow(warning: FormWarning, modifier: Modifier = Modifier) 
         // 디자인시스템 34행: 경고는 색과 아이콘을 함께 쓴다.
         Text("!", color = FeedbackWarning, style = MaterialTheme.typography.labelLarge)
         Text(
-            text = warning.message,
+            text = warning.messageWith(side),
             style = MaterialTheme.typography.bodyMedium,
             color = FeedbackWarning,
         )
@@ -716,6 +725,20 @@ private fun Float.formatRatio(): String = "%.2f".format(this)
  * 무릎 각도 기준은 같은 깊이에서도 체절 비율에 따라 달라진다. 기준선이 있을 때와 없을 때
  * 판정이 바뀌는데, 그 사실을 표시하지 않으면 사용자·개발자 모두 원인을 찾을 수 없다.
  */
+/**
+ * 무릎 경고에만 쪽을 붙인다.
+ *
+ * 사람 기준 좌/우다(화면 기준이 아니다) — 코치가 말하듯 "왼쪽 무릎"이 사용자 자신의
+ * 왼쪽을 가리켜야 한다. [FrameFeatures]가 편차를 계산할 때 이미 화면 좌우를 사람 좌우로
+ * 뒤집어 두었다.
+ */
+private fun FormWarning.messageWith(side: Side?): String = when {
+    side == null -> message
+    this == FormWarning.KNEE_VALGUS || this == FormWarning.KNEE_FLARED ->
+        "${if (side == Side.LEFT) "왼쪽" else "오른쪽"} $message"
+    else -> message
+}
+
 private fun DepthBasis.suffix(): String = when (this) {
     DepthBasis.HIP_HEIGHT -> "(높이)"
     DepthBasis.SHIN_LENGTH -> "(정강이)"

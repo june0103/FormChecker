@@ -97,6 +97,16 @@ data class FrameFeatures(
     val shinDepthRatio: Float?,
     /** 골반 중심 좌우 이동 `(hipCenter.x − ankleCenter.x) / 발목 간격`. */
     val hipShiftRatio: Float?,
+
+    /**
+     * 발목 간격(종횡비 보정 유클리드 거리). 정면 특징들의 **분모**다.
+     *
+     * 값 자체가 판정 대상은 아니지만 노출한다 — 이게 무너지면 그것으로 나눈 특징이 전부
+     * 물리적으로 불가능한 값을 내는데, 분모를 볼 수 없으면 원인을 찾을 수 없다. 실측
+     * P009 세션에서 발목 간격 p5가 0.0118(정상 세션은 0.135~0.243)까지 내려가
+     * `kneeToeDeviation`이 최대 7.761(허용폭은 0.10)을 냈다.
+     */
+    val ankleSpread: Float?,
     /** 골반 기울기(도). 좌우 힙을 잇는 선과 수평축의 각. */
     val pelvisTilt: Float?,
     /** 어깨 기울기(도). */
@@ -425,6 +435,7 @@ data class FrameFeatures(
                 rightKneeToeDeviation = kneeToeDeviation(Side.RIGHT),
                 shinDepthRatio = shinDepthRatio,
                 hipShiftRatio = hipShiftRatio,
+                ankleSpread = ankleSpread,
                 pelvisTilt = pelvisTilt,
                 shoulderTilt = shoulderTilt,
                 trunkLateralLean = trunkLateralLean,
