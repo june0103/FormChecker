@@ -542,23 +542,66 @@ class DepthBasisTest {
         assertEquals(KneeAlignment.VALGUS, kneeForm(0.02f).kneeAlignment)
     }
 
-    /** 자세 생성기가 실제로 게이트를 넘는 굴곡을 만드는지 고정한다. */
+    /**
+     * 자세 생성기가 실제로 게이트를 넘는 깊이를 만드는지 고정한다.
+     *
+     * 게이트는 무릎 각도가 아니라 **깊이**다 — 정면 투영에서 무릎 각도는 무릎이 바깥으로
+     * 이동해야 커지므로, 무릎을 모으는 오류가 게이트 신호를 억제한다(실측 상관 −0.586).
+     */
     @Test
-    fun `자세 생성기가 굴곡 게이트를 넘긴다`() {
-        val squat = analyzer.analyze(kneeShiftedPose(0f), aspect, CameraAngle.FRONT)
-        val standing = analyzer.analyze(
-            kneeShiftedPose(0f, STANDING_HIP_Y), aspect, CameraAngle.FRONT,
-        )
-        val squatFlexion = 180f - squat.kneeAngles.representative!!
-        val standingFlexion = 180f - standing.kneeAngles.representative!!
+    fun `자세 생성기가 깊이 게이트를 넘긴다`() {
+        fun depthOf(hipY: Float) = FrameFeatures.from(
+            pose = kneeShiftedPose(0f, hipY),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        ).shinDepthRatio!!
 
+        val squat = depthOf(SQUAT_HIP_Y)
+        val standing = depthOf(STANDING_HIP_Y)
         assertTrue(
-            "앉은 자세 굴곡 $squatFlexion 은 게이트 ${thresholds.kneeToeMinFlexion} 이상",
-            squatFlexion >= thresholds.kneeToeMinFlexion,
+            "앉은 자세 깊이 $squat 는 게이트 ${thresholds.kneeToeMinDepth} 이상",
+            squat >= thresholds.kneeToeMinDepth,
         )
         assertTrue(
-            "선 자세 굴곡 $standingFlexion 은 게이트 미만",
-            standingFlexion < thresholds.kneeToeMinFlexion,
+            "선 자세 깊이 $standing 는 게이트 미만",
+            standing < thresholds.kneeToeMinDepth,
+        )
+    }
+
+    /**
+     * **무릎을 모으면 정면 투영 굴곡이 작아진다** — 그래서 굴곡으로 게이트하면 잡으려는
+     * 오류가 게이트를 닫는다. 깊이 게이트는 그 영향을 받지 않아야 한다.
+     */
+    @Test
+    fun `무릎을 모아도 깊이 게이트는 열린다`() {
+        fun features(offset: Float) = FrameFeatures.from(
+            pose = kneeShiftedPose(offset),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+
+        val aligned = features(0f)
+        val kneesIn = features(0.02f)
+        // 굴곡은 줄어들 수 있지만 깊이는 유지된다.
+        assertTrue(
+            "무릎을 모아도 깊이 게이트를 넘는다 (실제: ${kneesIn.shinDepthRatio})",
+            kneesIn.shinDepthRatio!! >= thresholds.kneeToeMinDepth,
+        )
+        assertEquals(
+            "깊이는 무릎의 좌우 이동에 거의 영향받지 않는다",
+            aligned.shinDepthRatio!!,
+            kneesIn.shinDepthRatio!!,
+            0.05f,
+        )
+        // 그리고 판정이 실제로 난다.
+        assertEquals(
+            KneeAlignment.VALGUS,
+            analyzer.analyze(kneeShiftedPose(0.02f), aspect, CameraAngle.FRONT, kneesIn)
+                .kneeAlignment,
         )
     }
 
