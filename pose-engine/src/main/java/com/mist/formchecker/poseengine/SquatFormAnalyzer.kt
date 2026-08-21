@@ -95,15 +95,28 @@ class SquatFormAnalyzer(
         // 이동해야 커지므로, **무릎을 모으는 오류가 게이트 신호를 억제한다**. 깊이는
         // 세로 거리만 쓰므로 무릎의 좌우 이동과 무관하다
         // (FormThresholds.kneeToeMinDepth 주석의 실측 표 참고).
+        //
+        // 발 간격도 함께 본다 — 편차의 분모가 발목 간격이므로, 두 발목이 화면에서 겹치면
+        // 작은 분모가 편차를 통째로 부풀린다. 실측 P009 세션이 발목 간격 p5 0.0118(정상
+        // 세션은 0.135~0.243)로 무너져 편차 최대 7.761을 냈다 — 허용폭이 0.10인 값이다.
+        // `minStanceWidth`(0.04)를 걸면 그 세션의 불가능한 프레임 50개가 전부 걸러지고,
+        // 정상 11세션에서는 한 프레임도 버려지지 않는다(최소 발목 간격 0.129).
         val gateDepth = features?.shinDepthRatio
+        val stanceWideEnough = (features?.ankleSpread ?: 0f) >= form.minStanceWidth
         val kneeToeJudgeable = cameraAngle.supports(FormCheck.KNEE_ALIGNMENT) &&
-            gateDepth != null && gateDepth >= form.kneeToeMinDepth
-        val kneeToeDeviation = if (kneeToeJudgeable) {
-            listOfNotNull(features?.leftKneeToeDeviation, features?.rightKneeToeDeviation)
-                .maxByOrNull { abs(it) }
+            gateDepth != null && gateDepth >= form.kneeToeMinDepth && stanceWideEnough
+
+        // 좌우 중 벗어남이 큰 쪽을 고르고, **어느 쪽이었는지 함께 남긴다** — 경고에 쪽을
+        // 붙이는 데 쓴다. 별도의 비대칭 경고는 만들지 않았다(SquatForm.kneeToeSide 참고).
+        val worstKneeToe = if (kneeToeJudgeable) {
+            listOfNotNull(
+                features?.leftKneeToeDeviation?.let { Side.LEFT to it },
+                features?.rightKneeToeDeviation?.let { Side.RIGHT to it },
+            ).maxByOrNull { abs(it.second) }
         } else {
             null
         }
+        val kneeToeDeviation = worstKneeToe?.second
 
         return SquatForm(
             cameraAngle = cameraAngle,
@@ -118,6 +131,10 @@ class SquatFormAnalyzer(
             hipShiftRatio = hipShiftRatio,
             kneeToeDeviation = kneeToeDeviation,
             kneeAlignment = form.kneeAlignmentByToe(kneeToeDeviation),
+            // 정렬이 GOOD이면 쪽을 남기지 않는다 — 경고가 없는데 쪽이 붙어 있으면
+            // 소비자가 "이 쪽이 문제"로 읽는다.
+            kneeToeSide = worstKneeToe?.first
+                ?.takeIf { form.kneeAlignmentByToe(kneeToeDeviation) != KneeAlignment.GOOD },
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
                 knees.asymmetry
             } else {

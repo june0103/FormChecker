@@ -402,8 +402,13 @@ class DepthBasisTest {
      * 발목 간격을 0.10으로 두었으므로 오프셋을 등방 보정한 값(0.075)으로 나누면 비율이
      * 된다.
      */
-    private fun kneeShiftedPose(kneeOffset: Float, hipY: Float = SQUAT_HIP_Y): Pose {
-        val spread = 0.10f
+    private fun kneeShiftedPose(
+        kneeOffset: Float,
+        hipY: Float = SQUAT_HIP_Y,
+        spread: Float = 0.10f,
+        leftOffset: Float = kneeOffset,
+        rightOffset: Float = kneeOffset,
+    ): Pose {
         val points = mutableMapOf<KeypointType, Pair<Float, Float>>()
         // 사람의 왼쪽은 화면 오른쪽(x 큼)에 나타난다 — 엔진의 부호 규약과 맞춰야 한다.
         // 여기를 뒤집으면 내측/외측 판정이 통째로 반대가 된다.
@@ -413,8 +418,8 @@ class DepthBasisTest {
         }
         sides(KeypointType.LEFT_ANKLE, KeypointType.RIGHT_ANKLE, 0.50f, 0.90f, spread)
         // 내측(+)은 왼쪽 무릎을 x 감소, 오른쪽 무릎을 x 증가 방향으로 옮기는 것이다.
-        points[KeypointType.LEFT_KNEE] = (0.50f + spread / 2 - kneeOffset) to 0.70f
-        points[KeypointType.RIGHT_KNEE] = (0.50f - spread / 2 + kneeOffset) to 0.70f
+        points[KeypointType.LEFT_KNEE] = (0.50f + spread / 2 - leftOffset) to 0.70f
+        points[KeypointType.RIGHT_KNEE] = (0.50f - spread / 2 + rightOffset) to 0.70f
         // 힙은 좁게 모아 둔다 — 무릎보다 안쪽에 있어야 굴곡각이 만들어진다.
         sides(KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP, 0.50f, hipY, 0.04f)
         sides(
@@ -436,20 +441,25 @@ class DepthBasisTest {
         )
     }
 
-    private fun kneeForm(kneeOffset: Float, hipY: Float = SQUAT_HIP_Y): SquatForm {
+    private fun kneeForm(
+        kneeOffset: Float,
+        hipY: Float = SQUAT_HIP_Y,
+        spread: Float = 0.10f,
+        leftOffset: Float = kneeOffset,
+        rightOffset: Float = kneeOffset,
+    ): SquatForm {
+        fun pose(h: Float) = kneeShiftedPose(kneeOffset, h, spread, leftOffset, rightOffset)
         val calibration = StandingCalibration.from(
-            List(30) { kneeShiftedPose(0f, STANDING_HIP_Y) to aspect },
+            List(30) { kneeShiftedPose(0f, STANDING_HIP_Y, spread) to aspect },
         )!!
         val features = FrameFeatures.from(
-            pose = kneeShiftedPose(kneeOffset, hipY),
+            pose = pose(hipY),
             aspectRatio = aspect,
             calibration = calibration,
             view = CaptureView.FRONT,
             activeSide = null,
         )
-        return analyzer.analyze(
-            kneeShiftedPose(kneeOffset, hipY), aspect, CameraAngle.FRONT, features,
-        )
+        return analyzer.analyze(pose(hipY), aspect, CameraAngle.FRONT, features)
     }
 
     /**
@@ -490,6 +500,78 @@ class DepthBasisTest {
         // 오프셋 0.007 → 등방 발목 간격 0.075 대비 약 0.09 < 허용폭 0.10
         assertEquals(KneeAlignment.GOOD, kneeForm(0.007f).kneeAlignment)
         assertEquals(KneeAlignment.GOOD, kneeForm(-0.007f).kneeAlignment)
+    }
+
+    /**
+     * 분모가 무너지면 판정하지 않는다.
+     *
+     * 편차의 분모는 발목 간격이다. 두 발목이 화면에서 겹치면 작은 분모가 편차를 통째로
+     * 부풀린다 — 실측 P009 세션이 발목 간격 p5 0.0118(정상 세션은 0.129~0.238)까지
+     * 무너져 편차 **최대 7.761**을 냈다. 허용폭이 0.10인 값이다.
+     *
+     * `minStanceWidth`(0.04)를 걸면 그 세션의 불가능한 프레임 50개가 전부 걸러지고 정상
+     * 11세션에서는 한 프레임도 버려지지 않는다.
+     */
+    @Test
+    fun `발 간격이 무너지면 무릎 정렬을 판정하지 않는다`() {
+        // 발 간격 0.03 → 종횡비 보정 후 0.0225 < minStanceWidth 0.04
+        val narrow = kneeForm(kneeOffset = 0.02f, spread = 0.03f)
+        assertNull("분모가 무너졌으면 값을 내지 않는다", narrow.kneeToeDeviation)
+        assertNull(narrow.kneeAlignment)
+
+        // 같은 무릎 오프셋인데 발 간격만 정상이면 판정된다 — 가드가 무릎이 아니라
+        // 발 간격 때문에 닫힌 것을 확인한다.
+        val normal = kneeForm(kneeOffset = 0.02f)
+        assertNotNull(normal.kneeToeDeviation)
+    }
+
+    // ── 어느 쪽 무릎인지 ────────────────────────────────────
+
+    /**
+     * 좌우 중 나쁜 쪽을 남긴다. "무릎을 벌려주세요"보다 "왼쪽 무릎을 벌려주세요"가
+     * 실행 가능한 지시이고, 좌우 편차는 이미 둘 다 계산하므로 **새 임계값이 필요 없다.**
+     *
+     * 실측에서 어느 쪽이 나쁜지는 사람 안에서 일관됐다 — 9세션 중 8개가 90~100%
+     * (P011은 두 세션 모두 왼쪽 100%).
+     */
+    @Test
+    fun `좌우 중 나쁜 쪽을 남긴다`() {
+        val leftBad = kneeForm(kneeOffset = 0f, leftOffset = 0.02f, rightOffset = 0f)
+        assertEquals(Side.LEFT, leftBad.kneeToeSide)
+        assertEquals(KneeAlignment.VALGUS, leftBad.kneeAlignment)
+
+        val rightBad = kneeForm(kneeOffset = 0f, leftOffset = 0f, rightOffset = 0.02f)
+        assertEquals(Side.RIGHT, rightBad.kneeToeSide)
+        assertEquals(KneeAlignment.VALGUS, rightBad.kneeAlignment)
+    }
+
+    /** 정상이면 쪽을 남기지 않는다 — 경고가 없는데 쪽이 붙으면 그 쪽이 문제로 읽힌다. */
+    @Test
+    fun `정렬이 정상이면 쪽을 남기지 않는다`() {
+        val good = kneeForm(0f)
+        assertEquals(KneeAlignment.GOOD, good.kneeAlignment)
+        assertNull(good.kneeToeSide)
+    }
+
+    /**
+     * 좌우 차이로 **별도 경고를 만들지 않았다.**
+     *
+     * `|좌 − 우|`를 재보니 정상 229 rep에서 새로 잡는 것이 **0개**였다 — 어느 후보
+     * 경계에서도 비대칭이 걸리는 rep은 이미 [SquatForm.kneeAlignment]가 걸고 있었다
+     * (0.15 경계에서 27 rep, 전부 중복). 두 무릎은 함께 움직이므로 차이가 커지려면
+     * 한쪽이 이미 허용폭을 넘어야 한다. 이 테스트가 그 구조를 고정한다.
+     */
+    @Test
+    fun `좌우 차이가 커지려면 한쪽이 이미 허용폭을 넘는다`() {
+        val tolerance = thresholds.kneeToeToleranceRatio
+        val form = kneeForm(kneeOffset = 0f, leftOffset = 0.02f, rightOffset = 0f)
+
+        val worst = form.kneeToeDeviation!!
+        assertTrue(
+            "나쁜 쪽이 허용폭을 넘지 않았는데 좌우차만 큰 경우는 실측에 없었다",
+            kotlin.math.abs(worst) > tolerance,
+        )
+        assertNotEquals(KneeAlignment.GOOD, form.kneeAlignment)
     }
 
     /**
