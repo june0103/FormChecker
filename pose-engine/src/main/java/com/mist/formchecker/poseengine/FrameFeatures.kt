@@ -132,7 +132,15 @@ data class FrameFeatures(
         fun from(
             pose: Pose,
             aspectRatio: Float,
-            calibration: StandingCalibration,
+            /**
+             * 선 자세 기준선. **null이어도 된다.**
+             *
+             * 거리 특징(깊이 비율·엉덩이 하강·뒤꿈치 들림·무릎 내측 이동)은 이 값을 분모로
+             * 쓰므로 없으면 null이 된다. 하지만 **발목 간격으로 정규화하는 특징**(골반 쏠림,
+             * 무릎–발끝 정렬)과 각도 특징은 기준선이 필요 없다 — 그것까지 못 쓰게 만들
+             * 이유가 없다.
+             */
+            calibration: StandingCalibration?,
             view: CaptureView,
             activeSide: Side?,
             minConfidence: Float = StandingCalibration.MIN_CONFIDENCE,
@@ -140,8 +148,9 @@ data class FrameFeatures(
             fun p(type: KeypointType) = Geometry.point(pose, type, aspectRatio)
             fun ok(type: KeypointType) = pose.isReliable(type, minConfidence)
 
-            val legLength = calibration.legLength
-            val footLength = calibration.footLength
+            // 0이면 아래의 `> EPSILON` 가드가 전부 걸려 해당 특징이 null이 된다.
+            val legLength = calibration?.legLength ?: 0f
+            val footLength = calibration?.footLength ?: 0f
 
             // ── 관절각 ──────────────────────────────────────
             fun kneeFlexion(side: Side) =
@@ -152,7 +161,7 @@ data class FrameFeatures(
 
             fun dorsiflexion(side: Side) =
                 Geometry.ankleAngle(pose, side, aspectRatio, minConfidence)
-                    ?.let { calibration.standingAnkleAngle - it }
+                    ?.let { angle -> calibration?.let { it.standingAnkleAngle - angle } }
 
             // ── 측면 ────────────────────────────────────────
             // 측면 특징은 가까운 쪽 다리 하나로만 계산한다. 좌우 평균을 쓰면 가려진
@@ -219,7 +228,8 @@ data class FrameFeatures(
             }
 
             val hipDropRatio = if (
-                view.isSide && hipReference != null && legLength > Geometry.EPSILON
+                view.isSide && hipReference != null && calibration != null &&
+                legLength > Geometry.EPSILON
             ) {
                 (hipReference.second - calibration.standingHipY) / legLength
             } else {
@@ -243,6 +253,7 @@ data class FrameFeatures(
                 val heel = Geometry.heel(side)
                 if (!ok(heel)) return null
                 // y는 아래로 증가하므로 들리면 y가 작아진다.
+                if (calibration == null) return null
                 return (calibration.standingHeelY - pose[heel].y) / footLength
             }
 
@@ -259,7 +270,8 @@ data class FrameFeatures(
             }
 
             val stanceWidthRatio = if (
-                view.isFront && ankleSpread != null && calibration.hipWidth > Geometry.EPSILON
+                view.isFront && ankleSpread != null && calibration != null &&
+                    calibration.hipWidth > Geometry.EPSILON
             ) {
                 ankleSpread / calibration.hipWidth
             } else {

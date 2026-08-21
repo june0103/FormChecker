@@ -2,6 +2,7 @@ package com.mist.formchecker.poseengine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -439,5 +440,51 @@ class DepthBasisTest {
                 thresholds.kneeAlignmentOf(standingRatio = 0.8f, bottomRatio = 0.8f * gain),
             )
         }
+    }
+
+    // ── 기준선이 없어도 되는 특징 ───────────────────────────
+
+    /**
+     * 골반 쏠림과 무릎–발끝 정렬은 **발목 간격**으로 정규화하므로 선 자세 기준선이 필요
+     * 없다. 기준선을 요구하면 캘리브레이션을 안 한 사용자에게서 이 두 판정을 이유 없이
+     * 빼앗는다 — 처음 구현이 실제로 그랬다.
+     */
+    @Test
+    fun `기준선이 없어도 골반 쏠림과 무릎 정렬을 낸다`() {
+        val features = FrameFeatures.from(
+            pose = kneeShiftedPose(0.02f),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+
+        assertNotNull("골반 쏠림", features.hipShiftRatio)
+        assertNotNull("무릎–발끝(왼)", features.leftKneeToeDeviation)
+        assertNotNull("무릎–발끝(오)", features.rightKneeToeDeviation)
+
+        val form = analyzer.analyze(
+            kneeShiftedPose(0.02f), aspect, CameraAngle.FRONT, features,
+        )
+        assertEquals(KneeAlignment.VALGUS, form.kneeAlignment)
+    }
+
+    /** 거리 특징은 분모가 없으므로 기준선 없이는 낼 수 없다. 추정값을 만들지 않는다. */
+    @Test
+    fun `기준선이 없으면 거리 특징은 비운다`() {
+        val features = FrameFeatures.from(
+            pose = sidePose(90f),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.SIDE_LEFT,
+            activeSide = Side.LEFT,
+        )
+
+        assertNull("깊이 비율", features.depthRatio)
+        assertNull("엉덩이 하강", features.hipDropRatio)
+        assertNull("뒤꿈치 들림", features.leftHeelRise)
+        assertNull("무릎 내측 이동", features.leftMedialKneeDisplacement)
+        // 각도는 기준선과 무관하므로 남아야 한다.
+        assertNotNull("무릎 굴곡", features.representativeKneeFlexion)
     }
 }
