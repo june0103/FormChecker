@@ -157,6 +157,26 @@ class SquatFormAnalyzerTest {
         )
     }
 
+    /**
+     * 실측 정상 범위를 경계 안에 고정한다. 측면 3세션 44 rep의 rep 내부 프레임 분포가
+     * p99 40.1° / 최대 41.1°였고, 45°는 그 전부를 통과시킨다.
+     *
+     * 이 테스트가 깨진다는 건 임계값을 정상 표본 안으로 내렸다는 뜻이다 — 오류를 더 잡으려고
+     * 내릴 수는 있지만, **그때는 정상 41.1°가 오탐이 된다는 것을 알고 내려야 한다.**
+     */
+    @Test
+    fun `실측 정상 상체 숙임은 경고하지 않는다`() {
+        val limit = FormThresholds().torsoLeanLimitDegrees
+
+        // rep 내부 p50 / p95 / p99 / 최대
+        for (measured in listOf(29.5f, 38.8f, 40.1f, 41.1f)) {
+            assertTrue(
+                "실측 정상 ${measured}°가 한계 ${limit}°를 넘었다",
+                measured <= limit,
+            )
+        }
+    }
+
     @Test
     fun `깊이가 부족하면 경고가 나온다`() {
         // 무릎이 살짝만 굽은 자세 → SHALLOW
