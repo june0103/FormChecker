@@ -26,6 +26,7 @@ import com.mist.formchecker.poseengine.RtmPoseEngine
 import com.mist.formchecker.poseengine.SquatAnalyzerConfig
 import com.mist.formchecker.poseengine.SquatForm
 import com.mist.formchecker.poseengine.CaptureView
+import com.mist.formchecker.poseengine.DepthBasis
 import com.mist.formchecker.poseengine.FrameFeatures
 import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.poseengine.SquatFormAnalyzer
@@ -91,6 +92,13 @@ data class WorkoutUiState(
     val lastRep: RepSummary? = null,
     /** 마지막 rep의 깊이 판정. 카운팅과 분리해 rep 종료 후 별도로 평가한 결과다. */
     val lastRepDepth: DepthLevel? = null,
+    /**
+     * [lastRepDepth]를 무엇으로 판정했는지.
+     *
+     * 두 기준은 환산되지 않으므로 어느 쪽을 썼는지 남겨야 한다. 기준선이 생기거나 사라질 때
+     * 판정이 조용히 바뀌면 리포트에서 원인을 찾을 수 없다.
+     */
+    val lastRepDepthBasis: DepthBasis? = null,
     /**
      * 마지막 rep의 무릎 정렬 판정. 정면 촬영에서만 값이 있다.
      *
@@ -223,6 +231,14 @@ class WorkoutViewModel @Inject constructor(
     /** 추론 지연 표시용 지수이동평균. 프레임마다 값이 튀면 읽을 수가 없다. */
     private var smoothedInferenceMillis = 0.0
 
+    /**
+     * 현재 rep에서 관측한 가장 깊은 지점의 깊이 비율.
+     *
+     * rep 요약의 `minKneeAngle`로는 비율 기준 판정을 할 수 없어 따로 모은다. 최댓값인
+     * 이유는 힙이 내려갈수록 값이 커지기 때문이다(화면 y가 아래로 증가).
+     */
+    private var repMaxDepthRatio: Float? = null
+
     // ── 기준 자세 ───────────────────────────────────────────
     /** 캘리브레이션 창에 모인 프레임. (pose, aspectRatio). */
     private val calibrationFrames = mutableListOf<Pair<Pose, Float>>()
@@ -317,23 +333,33 @@ class WorkoutViewModel @Inject constructor(
 
         val fps = trackFps(result.timestampMs)
 
+        // 특징을 먼저 계산한다 — 판정이 이 값을 쓴다. 기준선이 없으면 null이고, 그때는
+        // 판정이 각도 기준으로 대체된다.
+        val features = featuresOf(result)
+
         // 판정은 여기서 한다 — 사용자가 각도를 바꾸면 다음 프레임부터 바로 반영되어야
         // 하는데, 카메라에 붙은 분석기는 교체되지 않아 각도 변경을 알 수 없다.
         val form = formAnalyzer.analyze(
             pose = result.pose,
             frameAspectRatio = result.aspectRatio,
             cameraAngle = _uiState.value.cameraAngle,
+            features = features,
         )
 
         val event = stateMachine.update(buildRepFrame(result, form))
+
+        // rep이 시작될 때 비우고 그 뒤로 최댓값을 쌓는다. 시작 프레임부터 모아야 하므로
+        // 이벤트를 받은 직후에 처리한다.
+        if (event is RepEvent.Started) repMaxDepthRatio = null
+        form.depthRatio?.let { ratio ->
+            repMaxDepthRatio = repMaxDepthRatio?.coerceAtLeast(ratio) ?: ratio
+        }
 
         // 카운팅과 독립적으로 돌린다. 기준선을 재는 중에도 rep은 세어져야 한다 — 사용자가
         // 기준 자세를 잡는 동안 운동을 멈추라고 요구할 이유가 없다.
         if (_uiState.value.calibrationStage == CalibrationStage.COLLECTING) {
             stepCalibration(result)
         }
-
-        val features = featuresOf(result)
 
         _uiState.update { state ->
             var next = state.copy(
@@ -351,8 +377,16 @@ class WorkoutViewModel @Inject constructor(
                     // 깊이는 카운팅과 분리해 rep이 끝난 뒤 최저 각도로 별도 판정한다.
                     // 설계문서 3.2절의 모순(BOTTOM < 100도 이면서 깊이부족 >= 120도)을
                     // 피하려면 이 두 판단이 섞이지 않아야 한다.
-                    lastRepDepth = event.summary.aggregate.minKneeAngle
-                        ?.let(config.form::depthLevelOf),
+                    // 기준선이 있으면 엉덩이 높이로 판정한다 — 패럴렐 경계가 정의에서
+                    // 나오므로 사람마다 달라지지 않는다. 없으면 각도로 대체한다.
+                    lastRepDepth = repMaxDepthRatio?.let(config.form::depthLevelByRatio)
+                        ?: event.summary.aggregate.minKneeAngle
+                            ?.let(config.form::depthLevelOf),
+                    lastRepDepthBasis = when {
+                        repMaxDepthRatio != null -> DepthBasis.HIP_HEIGHT
+                        event.summary.aggregate.minKneeAngle != null -> DepthBasis.KNEE_ANGLE
+                        else -> null
+                    },
                     lastRepAlignment = alignmentOf(event.summary),
                     lastAbortReason = null,
                 )
@@ -572,6 +606,8 @@ class WorkoutViewModel @Inject constructor(
         kneeMedian.reset()
         smoothedFrameIntervalMs = 0.0
         lastFrameTimestampMs = null
+        // 진행 중이던 rep의 깊이를 다음 rep으로 흘리지 않는다.
+        repMaxDepthRatio = null
     }
 
     private fun onFrameDropped() {

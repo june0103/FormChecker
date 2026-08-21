@@ -24,22 +24,49 @@ class SquatFormAnalyzer(
     private val detection get() = config.angleDetection
     private val minConfidence get() = config.minConfidence
 
+    /**
+     * @param features 선 자세 기준선으로 정규화한 특징. 있으면 **깊이와 상체 숙임을 이쪽으로
+     *   판정한다.** 없으면 각도 기준으로 대체한다 — 기준선이 없다고 카운팅과 피드백이 모두
+     *   멈추면 얻는 것 없이 운동만 끊긴다.
+     */
     fun analyze(
         pose: Pose,
         frameAspectRatio: Float,
         cameraAngle: CameraAngle,
+        features: FrameFeatures? = null,
     ): SquatForm {
         val knees = JointAngles.knees(pose, frameAspectRatio, minConfidence)
 
         // 깊이는 정면에서도 값 자체는 나오지만 원근 왜곡이 있어 신뢰할 수 없다.
         // 지원 각도가 아니면 계산하지 않는다.
-        val depth = if (cameraAngle.supports(FormCheck.DEPTH)) {
-            knees.representative?.let(form::depthLevelOf)
-        } else {
-            null
+        val depthSupported = cameraAngle.supports(FormCheck.DEPTH)
+        val depthRatio = features?.depthRatio?.takeIf { depthSupported }
+
+        // 기준선이 있으면 엉덩이 높이로 판정한다. 패럴렐 경계가 정의에서 나오기 때문이다
+        // (FormThresholds.depthLevelByRatio 참고). 없으면 각도로 대체한다.
+        val depth: DepthLevel?
+        val depthBasis: DepthBasis?
+        when {
+            depthRatio != null -> {
+                depth = form.depthLevelByRatio(depthRatio)
+                depthBasis = DepthBasis.HIP_HEIGHT
+            }
+            depthSupported -> {
+                depth = knees.representative?.let(form::depthLevelOf)
+                depthBasis = depth?.let { DepthBasis.KNEE_ANGLE }
+            }
+            else -> {
+                depth = null
+                depthBasis = null
+            }
         }
+
+        // 상체 숙임은 같은 양을 재지만 기준점이 다르다. FrameFeatures는 활성측 힙 하나를
+        // 쓰고, 아래 대체 경로는 좌우 중점을 쓴다. 측면에서 먼 쪽 힙은 가려져 신뢰도가
+        // 낮아(실측 중앙값 0.518) 중점을 쓰면 값이 통째로 비는 프레임이 생긴다 —
+        // 실측 499프레임 중 146프레임이 그랬다. 기준선이 있으면 그쪽을 쓴다.
         val torsoLean = if (cameraAngle.supports(FormCheck.TORSO_LEAN)) {
-            torsoLean(pose, frameAspectRatio)
+            features?.trunkLean ?: torsoLean(pose, frameAspectRatio)
         } else {
             null
         }
@@ -50,6 +77,8 @@ class SquatFormAnalyzer(
             kneeAngles = knees,
             hipAngles = JointAngles.hips(pose, frameAspectRatio, minConfidence),
             depth = depth,
+            depthBasis = depthBasis,
+            depthRatio = depthRatio,
             torsoLeanDegrees = torsoLean,
             kneeSpreadRatio = kneeSpreadRatio(pose),
             asymmetryDegrees = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
