@@ -117,6 +117,42 @@ data class StandingCalibration(
             )
         }
 
+        /**
+         * 카메라에 가까운 쪽 다리를 정한다.
+         *
+         * ## 왜 캘리브레이션 창에서 정하는가
+         * 활성측은 **세션 내내 고정해야 한다**(문서 §4.3) — 프레임마다 신뢰도 높은 쪽으로
+         * 갈아타면 관절 좌표가 전환되며 각도가 크게 튄다. 그러면 언제 정하느냐가 문제인데,
+         * 캘리브레이션 창은 정적이고 프레임이 수십 장이라 **판단이 가장 안정적인 유일한
+         * 지점**이다. 동작 중에 정하면 그 순간의 가림 상태에 좌우된다.
+         *
+         * 가까운 쪽이 신뢰도가 높다 — 먼 쪽은 몸에 가려져 추정값이 된다. 실측에서 먼 쪽
+         * 힙의 신뢰도 중앙값이 0.518로 하한 0.5를 겨우 넘었다.
+         *
+         * ## 왜 평균인가
+         * 한 프레임의 신뢰도는 흔들린다. 정적 구간이므로 평균해서 노이즈를 줄일 수 있고,
+         * 그게 이 창을 쓰는 이유다. 중앙값을 쓰지 않는 이유는 이상치를 걸러낼 필요가 없기
+         * 때문이다 — 여기서는 어느 쪽이 큰지만 알면 된다.
+         *
+         * @return 프레임이 없으면 null. 좌우가 같으면 [Side.LEFT].
+         */
+        fun nearerSide(frames: List<Pair<Pose, Float>>): Side? {
+            if (frames.isEmpty()) return null
+
+            fun meanConfidence(side: Side): Double {
+                val joints = listOf(Geometry.hip(side), Geometry.knee(side), Geometry.ankle(side))
+                return frames.sumOf { (pose, _) ->
+                    joints.sumOf { pose[it].confidence.toDouble() } / joints.size
+                } / frames.size
+            }
+
+            return if (meanConfidence(Side.LEFT) >= meanConfidence(Side.RIGHT)) {
+                Side.LEFT
+            } else {
+                Side.RIGHT
+            }
+        }
+
         /** 한 프레임에서 잰 값들. */
         private class Sample(
             val femur: Float,

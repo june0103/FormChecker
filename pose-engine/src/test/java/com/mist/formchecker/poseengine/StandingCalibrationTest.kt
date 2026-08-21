@@ -232,4 +232,55 @@ class StandingCalibrationTest {
         assertFalse(result.passed)
         assertTrue(result.problems.contains(StandingCalibration.Problem.UNSTABLE))
     }
+
+    /**
+     * 활성측은 세션 내내 고정해야 하므로(문서 §4.3) 정적인 캘리브레이션 창에서 정한다.
+     * 가까운 쪽이 신뢰도가 높다 — 먼 쪽은 몸에 가려져 추정값이 된다.
+     */
+    private fun sidedPose(leftConfidence: Float, rightConfidence: Float): Pose {
+        val base = standingPose()
+        val keypoints = base.keypoints.map { point ->
+            val side = when (point.type) {
+                KeypointType.LEFT_HIP, KeypointType.LEFT_KNEE, KeypointType.LEFT_ANKLE ->
+                    leftConfidence
+                KeypointType.RIGHT_HIP, KeypointType.RIGHT_KNEE, KeypointType.RIGHT_ANKLE ->
+                    rightConfidence
+                else -> point.confidence
+            }
+            Keypoint(point.type, point.x, point.y, side)
+        }
+        return Pose(keypoints, 0L)
+    }
+
+    @Test
+    fun `신뢰도가 높은 쪽을 가까운 다리로 본다`() {
+        val leftNear = List(30) { sidedPose(leftConfidence = 0.9f, rightConfidence = 0.5f) to aspect }
+        assertEquals(Side.LEFT, StandingCalibration.nearerSide(leftNear))
+
+        val rightNear = List(30) { sidedPose(leftConfidence = 0.5f, rightConfidence = 0.9f) to aspect }
+        assertEquals(Side.RIGHT, StandingCalibration.nearerSide(rightNear))
+    }
+
+    /**
+     * 한 프레임이 튀어도 판단이 뒤집히지 않아야 한다. 정적 구간을 평균하는 이유가 이것이다 —
+     * 동작 중에 정하면 그 순간의 가림 상태가 세션 전체의 기준을 결정한다.
+     */
+    @Test
+    fun `한 프레임의 튐으로 활성측이 뒤집히지 않는다`() {
+        val frames = List(29) { sidedPose(leftConfidence = 0.8f, rightConfidence = 0.6f) to aspect } +
+            listOf(sidedPose(leftConfidence = 0.1f, rightConfidence = 0.99f) to aspect)
+        assertEquals(Side.LEFT, StandingCalibration.nearerSide(frames))
+    }
+
+    @Test
+    fun `프레임이 없으면 활성측을 정하지 않는다`() {
+        assertNull(StandingCalibration.nearerSide(emptyList()))
+    }
+
+    /** 좌우가 같으면 한쪽으로 고정한다. 프레임마다 갈아타는 것보다 낫다. */
+    @Test
+    fun `좌우 신뢰도가 같으면 왼쪽으로 고정한다`() {
+        val frames = List(30) { sidedPose(leftConfidence = 0.7f, rightConfidence = 0.7f) to aspect }
+        assertEquals(Side.LEFT, StandingCalibration.nearerSide(frames))
+    }
 }
