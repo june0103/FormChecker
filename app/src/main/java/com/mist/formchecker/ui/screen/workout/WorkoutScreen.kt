@@ -284,10 +284,6 @@ private fun HudTopBand(
                     // 표시하지 않으면 기준선이 생길 때 값이 조용히 바뀐 것처럼 보인다.
                     state.lastRepDepthBasis?.let { basis -> append(basis.suffix()) }
                 }
-                // 무릎 정렬은 rep 단위 판정이라 여기(상단 rep 정보)에 온다.
-                // "참고"를 붙이는 이유: AI Hub 데이터에 무릎 모임 라벨이 없어 이 판정은
-                // 실측으로 검증된 바가 없다. 확정 판정처럼 보이면 안 된다.
-                state.lastRepAlignment?.let { append("  ·  무릎 ").append(it.label()).append(" (참고)") }
                 state.lastAbortReason?.let { append("  ·  중단 ").append(it.label()) }
             },
             style = MaterialTheme.typography.labelSmall,
@@ -364,7 +360,10 @@ private fun HudBottomBand(
             // 자체 수집 데이터로 임계값을 확정한 첫 항목. 경고는 warnings로 따로 나간다.
             form?.hipShiftRatio?.let { add("힙쏠림 ${it.formatRatio()}") }
             // 0이 정답이므로 부호까지 보여준다 — 양수는 안쪽, 음수는 바깥이다.
-            form?.kneeToeDeviation?.let { add("무릎-발끝 ${it.formatRatio()}") }
+            form?.kneeToeDeviation?.let { deviation ->
+                val state = form.kneeAlignment?.label().orEmpty()
+                add("무릎-발끝 ${deviation.formatRatio()}${if (state.isEmpty()) "" else " ($state)"}")
+            }
         }
         if (judgements.isNotEmpty()) {
             Text(
@@ -679,8 +678,9 @@ private fun CalibrationBar(
 
             CalibrationStage.NONE -> {
                 Text(
-                    text = "기준 자세를 재지 않았습니다 — 횟수는 세지만 깊이·상체·무릎 " +
-                        "정렬을 몸 크기로 정규화할 수 없습니다.",
+                    text = "기준 자세를 재지 않았습니다 — 무릎 정렬과 골반 쏠림은 " +
+                        "그대로 판정하지만(발목 간격 기준), 깊이와 상체 숙임은 몸 크기로 " +
+                        "정규화할 수 없어 각도 기준으로 대체합니다.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted,
                 )

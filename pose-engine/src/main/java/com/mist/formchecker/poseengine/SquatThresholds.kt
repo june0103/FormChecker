@@ -180,6 +180,34 @@ data class FormThresholds(
      */
     val kneeToeToleranceRatio: Float = 0.10f,
 
+    /**
+     * 무릎–발끝 정렬을 판정하기 시작하는 무릎 굴곡(도). 그 아래에서는 판정하지 않는다.
+     *
+     * ## 왜 필요한가
+     * **"무릎이 발끝 위"는 최저점 근처에서만 성립하는 규칙이다.** 선 자세에서는 무릎이
+     * 발끝보다 뒤(깊이 방향)에 있고 발끝은 바깥으로 벌어져 있어, 2D 정면 투영에서 무릎이
+     * 항상 "안쪽"으로 읽힌다. 그래서 게이트가 없으면 **가만히 서 있어도 "무릎을 벌려주세요"가
+     * 뜬다** — 실제로 그렇게 동작했다.
+     *
+     * 실측 12세션의 굴곡 구간별 편차 중앙값:
+     *
+     * | 굴곡 | 편차 중앙값 | 허용폭 초과 |
+     * |---|---|---|
+     * | 0~15° | **+0.286** | 99% |
+     * | 15~30° | +0.153 | 75% |
+     * | 30~45° | +0.079 | 38% |
+     * | 45~60° | +0.035 | 24% |
+     * | 60~75° | +0.018 | 33% |
+     * | 75~90° | +0.005 | 35% |
+     *
+     * 60°에서 편차 중앙값이 +0.018로 허용폭(0.10)의 1/5까지 내려간다. 45°는 +0.035로
+     * 아직 편향이 남아 있고, 90°까지 기다리면 하강 구간의 상당 부분을 놓친다.
+     *
+     * 60° 이후의 초과율 27~35%는 편향이 아니라 **실제로 정렬이 어긋난 사람들**이다
+     * (11명 중 6명이 오류 판정됐다).
+     */
+    val kneeToeMinFlexion: Float = 60f,
+
     /** 발 간격이 이보다 좁으면 무릎 정렬 비율이 불안정해 판정을 보류한다(정규화 좌표). */
     val minStanceWidth: Float = 0.04f,
 ) {
@@ -284,6 +312,8 @@ data class FormThresholds(
             "hipShiftLimit" to ThresholdOrigin.DATA_DERIVED,
             // 기준점 0은 정의, 허용폭은 사람내 MAD(11명 253 rep)에서 나왔다.
             "kneeToeToleranceRatio" to ThresholdOrigin.DATA_DERIVED,
+            // 굴곡 구간별 편차 곡선(12세션)에서 편향이 사라지는 지점.
+            "kneeToeMinFlexion" to ThresholdOrigin.DATA_DERIVED,
             "minStanceWidth" to ThresholdOrigin.PROVISIONAL,
         )
 

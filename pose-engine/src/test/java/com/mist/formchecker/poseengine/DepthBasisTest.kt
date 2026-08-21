@@ -2,6 +2,7 @@ package com.mist.formchecker.poseengine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -331,7 +332,16 @@ class DepthBasisTest {
      *
      * 발목 간격을 0.10(등방 0.075)으로 두었으므로 오프셋을 그 값으로 나누면 비율이 된다.
      */
-    private fun kneeShiftedPose(kneeOffset: Float): Pose {
+    /**
+     * 정면 자세. 발목·발끝은 고정하고 무릎만 [kneeOffset]만큼 옮겨 정렬 오차를 만든다.
+     *
+     * [hipY]로 굴곡을 조절한다 — 힙이 무릎 높이에 가까우면 굴곡이 커진다. 판정에 굴곡
+     * 게이트(60°)가 있으므로 선 자세와 앉은 자세를 구분해 만들어야 한다.
+     *
+     * 발목 간격을 0.10으로 두었으므로 오프셋을 등방 보정한 값(0.075)으로 나누면 비율이
+     * 된다.
+     */
+    private fun kneeShiftedPose(kneeOffset: Float, hipY: Float = SQUAT_HIP_Y): Pose {
         val spread = 0.10f
         val points = mutableMapOf<KeypointType, Pair<Float, Float>>()
         // 사람의 왼쪽은 화면 오른쪽(x 큼)에 나타난다 — 엔진의 부호 규약과 맞춰야 한다.
@@ -344,9 +354,13 @@ class DepthBasisTest {
         // 내측(+)은 왼쪽 무릎을 x 감소, 오른쪽 무릎을 x 증가 방향으로 옮기는 것이다.
         points[KeypointType.LEFT_KNEE] = (0.50f + spread / 2 - kneeOffset) to 0.70f
         points[KeypointType.RIGHT_KNEE] = (0.50f - spread / 2 + kneeOffset) to 0.70f
-        sides(KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP, 0.50f, 0.50f, spread)
-        sides(KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER, 0.50f, 0.30f, 0.20f)
-        points[KeypointType.NECK] = 0.50f to 0.28f
+        // 힙은 좁게 모아 둔다 — 무릎보다 안쪽에 있어야 굴곡각이 만들어진다.
+        sides(KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP, 0.50f, hipY, 0.04f)
+        sides(
+            KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER,
+            0.50f, hipY - 0.20f, 0.20f,
+        )
+        points[KeypointType.NECK] = 0.50f to (hipY - 0.22f)
         sides(KeypointType.LEFT_HEEL, KeypointType.RIGHT_HEEL, 0.50f, 0.94f, spread)
         sides(KeypointType.LEFT_BIG_TOE, KeypointType.RIGHT_BIG_TOE, 0.50f, 0.98f, spread)
         sides(KeypointType.LEFT_SMALL_TOE, KeypointType.RIGHT_SMALL_TOE, 0.50f, 0.98f, spread)
@@ -361,16 +375,20 @@ class DepthBasisTest {
         )
     }
 
-    private fun kneeForm(kneeOffset: Float): SquatForm {
-        val calibration = StandingCalibration.from(List(30) { kneeShiftedPose(0f) to aspect })!!
+    private fun kneeForm(kneeOffset: Float, hipY: Float = SQUAT_HIP_Y): SquatForm {
+        val calibration = StandingCalibration.from(
+            List(30) { kneeShiftedPose(0f, STANDING_HIP_Y) to aspect },
+        )!!
         val features = FrameFeatures.from(
-            pose = kneeShiftedPose(kneeOffset),
+            pose = kneeShiftedPose(kneeOffset, hipY),
             aspectRatio = aspect,
             calibration = calibration,
             view = CaptureView.FRONT,
             activeSide = null,
         )
-        return analyzer.analyze(kneeShiftedPose(kneeOffset), aspect, CameraAngle.FRONT, features)
+        return analyzer.analyze(
+            kneeShiftedPose(kneeOffset, hipY), aspect, CameraAngle.FRONT, features,
+        )
     }
 
     /**
@@ -439,5 +457,116 @@ class DepthBasisTest {
                 thresholds.kneeAlignmentOf(standingRatio = 0.8f, bottomRatio = 0.8f * gain),
             )
         }
+    }
+
+    // ── 기준선이 없어도 되는 특징 ───────────────────────────
+
+    /**
+     * 골반 쏠림과 무릎–발끝 정렬은 **발목 간격**으로 정규화하므로 선 자세 기준선이 필요
+     * 없다. 기준선을 요구하면 캘리브레이션을 안 한 사용자에게서 이 두 판정을 이유 없이
+     * 빼앗는다 — 처음 구현이 실제로 그랬다.
+     */
+    @Test
+    fun `기준선이 없어도 골반 쏠림과 무릎 정렬을 낸다`() {
+        val features = FrameFeatures.from(
+            pose = kneeShiftedPose(0.02f),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+
+        assertNotNull("골반 쏠림", features.hipShiftRatio)
+        assertNotNull("무릎–발끝(왼)", features.leftKneeToeDeviation)
+        assertNotNull("무릎–발끝(오)", features.rightKneeToeDeviation)
+
+        val form = analyzer.analyze(
+            kneeShiftedPose(0.02f), aspect, CameraAngle.FRONT, features,
+        )
+        assertEquals(KneeAlignment.VALGUS, form.kneeAlignment)
+    }
+
+    /** 거리 특징은 분모가 없으므로 기준선 없이는 낼 수 없다. 추정값을 만들지 않는다. */
+    @Test
+    fun `기준선이 없으면 거리 특징은 비운다`() {
+        val features = FrameFeatures.from(
+            pose = sidePose(90f),
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.SIDE_LEFT,
+            activeSide = Side.LEFT,
+        )
+
+        assertNull("깊이 비율", features.depthRatio)
+        assertNull("엉덩이 하강", features.hipDropRatio)
+        assertNull("뒤꿈치 들림", features.leftHeelRise)
+        assertNull("무릎 내측 이동", features.leftMedialKneeDisplacement)
+        // 각도는 기준선과 무관하므로 남아야 한다.
+        assertNotNull("무릎 굴곡", features.representativeKneeFlexion)
+    }
+
+    /**
+     * **선 자세에서는 판정하지 않는다.**
+     *
+     * 무릎이 발끝보다 뒤(깊이 방향)에 있고 발끝은 바깥으로 벌어져 있어, 2D 정면 투영에서
+     * 무릎이 항상 "안쪽"으로 읽힌다. 실측 선 자세 편차가 +0.309(중앙값)로 허용폭 초과율이
+     * 100%였다 — 게이트가 없으면 가만히 서 있어도 "무릎을 벌려주세요"가 뜬다.
+     */
+    @Test
+    fun `선 자세에서는 무릎 정렬을 판정하지 않는다`() {
+        val standing = kneeShiftedPose(kneeOffset = 0f, hipY = STANDING_HIP_Y)
+        val features = FrameFeatures.from(
+            pose = standing,
+            aspectRatio = aspect,
+            calibration = null,
+            view = CaptureView.FRONT,
+            activeSide = null,
+        )
+        // 특징 자체는 계산된다 — 판정만 보류한다.
+        assertNotNull("특징은 계산된다", features.leftKneeToeDeviation)
+
+        val form = analyzer.analyze(standing, aspect, CameraAngle.FRONT, features)
+        assertNull("선 자세에서는 판정하지 않는다", form.kneeAlignment)
+        assertTrue(
+            "선 자세에서 무릎 경고가 뜨면 안 된다",
+            form.warnings.none {
+                it == FormWarning.KNEE_VALGUS || it == FormWarning.KNEE_FLARED
+            },
+        )
+    }
+
+    /** 굴곡이 게이트를 넘으면 다시 판정한다. 게이트가 판정을 영구히 막지 않는다. */
+    @Test
+    fun `굴곡이 충분하면 판정을 재개한다`() {
+        assertNull(kneeForm(0.02f, hipY = STANDING_HIP_Y).kneeAlignment)
+        assertEquals(KneeAlignment.VALGUS, kneeForm(0.02f).kneeAlignment)
+    }
+
+    /** 자세 생성기가 실제로 게이트를 넘는 굴곡을 만드는지 고정한다. */
+    @Test
+    fun `자세 생성기가 굴곡 게이트를 넘긴다`() {
+        val squat = analyzer.analyze(kneeShiftedPose(0f), aspect, CameraAngle.FRONT)
+        val standing = analyzer.analyze(
+            kneeShiftedPose(0f, STANDING_HIP_Y), aspect, CameraAngle.FRONT,
+        )
+        val squatFlexion = 180f - squat.kneeAngles.representative!!
+        val standingFlexion = 180f - standing.kneeAngles.representative!!
+
+        assertTrue(
+            "앉은 자세 굴곡 $squatFlexion 은 게이트 ${thresholds.kneeToeMinFlexion} 이상",
+            squatFlexion >= thresholds.kneeToeMinFlexion,
+        )
+        assertTrue(
+            "선 자세 굴곡 $standingFlexion 은 게이트 미만",
+            standingFlexion < thresholds.kneeToeMinFlexion,
+        )
+    }
+
+    private companion object {
+        /** 앉은 자세 힙 높이. 무릎(0.70)에 가까워 굴곡이 크다. */
+        const val SQUAT_HIP_Y = 0.72f
+
+        /** 선 자세 힙 높이. 다리가 곧게 펴져 굴곡이 게이트 아래다. */
+        const val STANDING_HIP_Y = 0.50f
     }
 }

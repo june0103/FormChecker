@@ -99,13 +99,6 @@ data class WorkoutUiState(
      * 판정이 조용히 바뀌면 리포트에서 원인을 찾을 수 없다.
      */
     val lastRepDepthBasis: DepthBasis? = null,
-    /**
-     * 마지막 rep의 무릎 정렬 판정. 정면 촬영에서만 값이 있다.
-     *
-     * 프레임 단위가 아니라 rep 단위인 이유: 선 자세 무릎폭을 기준선으로 삼아야 하고,
-     * 그 기준선은 rep이 끝나야 확정된다([FormThresholds.kneeAlignmentOf]).
-     */
-    val lastRepAlignment: KneeAlignment? = null,
     /** 마지막으로 중단된 사유. 왜 안 세어졌는지 사용자·개발자가 알 수 있게 한다. */
     val lastAbortReason: RepEvent.Aborted.Reason? = null,
     /** 실측 분석 프레임레이트. 스무딩 창 크기 산출과 성능 확인에 쓴다. */
@@ -387,7 +380,6 @@ class WorkoutViewModel @Inject constructor(
                         event.summary.aggregate.minKneeAngle != null -> DepthBasis.KNEE_ANGLE
                         else -> null
                     },
-                    lastRepAlignment = alignmentOf(event.summary),
                     lastAbortReason = null,
                 )
                 is RepEvent.Aborted -> next.copy(lastAbortReason = event.reason)
@@ -509,20 +501,21 @@ class WorkoutViewModel @Inject constructor(
     }
 
     /**
-     * 기준선으로 정규화한 현재 프레임 특징.
+     * 현재 프레임 특징.
      *
-     * 화면에 띄워 **기준선이 맞는지 눈으로 확인하는** 용도다. 서 있을 때 깊이 비율이 0
-     * 근처인지, 앉으면 커지는지를 기기에서 봐야 판정을 이 값으로 옮길 수 있다. 판정
-     * 자체는 아직 기존 각도 기준을 쓴다.
+     * 기준선이 있으면 거리 특징(깊이 비율·엉덩이 하강·뒤꿈치 들림)까지 나오고, 없으면
+     * **발목 간격으로 정규화하는 특징만** 나온다 — 골반 쏠림과 무릎–발끝 정렬이 그렇다.
+     * 그 둘은 기준선이 필요 없으므로 캘리브레이션을 안 했다고 판정을 막지 않는다.
      */
     private fun featuresOf(result: PoseResult): FrameFeatures? {
         val state = _uiState.value
-        val calibration = state.calibration ?: return null
+        // 기준선은 없어도 된다 — 발목 간격으로 정규화하는 특징(골반 쏠림, 무릎–발끝 정렬)은
+        // 기준선이 필요 없다. 거리 특징만 null이 된다.
         val view = state.captureView ?: return null
         return FrameFeatures.from(
             pose = result.pose,
             aspectRatio = result.aspectRatio,
-            calibration = calibration,
+            calibration = state.calibration,
             view = view,
             activeSide = view.activeSide,
         )
@@ -553,20 +546,6 @@ class WorkoutViewModel @Inject constructor(
             leftFoot = FootSample.from(pose, FootSample.Side.LEFT),
             rightFoot = FootSample.from(pose, FootSample.Side.RIGHT),
             minLegConfidence = minLegConfidence(pose),
-        )
-    }
-
-    /**
-     * rep 요약으로 무릎 정렬을 판정한다. 지원하지 않는 촬영 각도에서는 판정하지 않는다.
-     *
-     * 측면에서는 무릎·발목이 앞뒤로 겹쳐 무릎폭 비율이 거의 무작위가 되므로, 값이 있어도
-     * 판정에 쓰면 안 된다.
-     */
-    private fun alignmentOf(summary: RepSummary): KneeAlignment? {
-        if (!summary.cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) return null
-        return config.form.kneeAlignmentOf(
-            standingRatio = summary.top?.kneeSpreadRatio,
-            bottomRatio = summary.bottom?.kneeSpreadRatio,
         )
     }
 
@@ -674,7 +653,6 @@ class WorkoutViewModel @Inject constructor(
                 repState = RepState.IDLE,
                 lastRep = null,
                 lastRepDepth = null,
-                lastRepAlignment = null,
                 lastAbortReason = null,
             )
         }
