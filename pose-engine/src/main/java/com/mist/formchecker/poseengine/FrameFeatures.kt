@@ -81,6 +81,20 @@ data class FrameFeatures(
      */
     val leftKneeToeDeviation: Float?,
     val rightKneeToeDeviation: Float?,
+    /**
+     * 정강이 길이로 정규화한 깊이 `(hip.y − knee.y) / (ankle.y − knee.y)`.
+     * 선 자세 ≈ −1.1, 패럴렐 ≈ 0.
+     *
+     * ## 왜 [depthRatio]와 따로 두는가
+     * 분자는 같고 **분모만 다르다** — [depthRatio]는 `legLength`(캘리브레이션)로 나누고
+     * 이 값은 그 프레임의 정강이 길이로 나눈다. 그래서 **기준선이 없어도 계산된다.**
+     *
+     * 판정용이 아니라 **게이트용**이다. 무릎–발끝 정렬은 최저점 근처에서만 성립하는
+     * 규칙이라 "충분히 앉았는가"를 먼저 물어야 하는데, 그 질문에 무릎 각도를 쓰면 안 된다 —
+     * 정면 투영에서 무릎 각도는 무릎이 바깥으로 이동해야 커지므로, **무릎을 모으는 오류가
+     * 게이트 신호 자체를 억제한다**(실측 상관 −0.586).
+     */
+    val shinDepthRatio: Float?,
     /** 골반 중심 좌우 이동 `(hipCenter.x − ankleCenter.x) / 발목 간격`. */
     val hipShiftRatio: Float?,
     /** 골반 기울기(도). 좌우 힙을 잇는 선과 수평축의 각. */
@@ -325,6 +339,22 @@ data class FrameFeatures(
                 return (p(knee).first - toeX) * inwardSign / ankleSpread
             }
 
+            /**
+             * 정강이 길이로 정규화한 깊이. 세로 거리만 쓰므로 종횡비 보정이 필요 없고,
+             * 캘리브레이션도 필요 없다.
+             */
+            val shinDepthRatio = run {
+                if (hipCenter == null) return@run null
+                if (!ok(KeypointType.LEFT_KNEE) || !ok(KeypointType.RIGHT_KNEE)) return@run null
+                if (!ok(KeypointType.LEFT_ANKLE) || !ok(KeypointType.RIGHT_ANKLE)) return@run null
+                val kneeY = (pose[KeypointType.LEFT_KNEE].y + pose[KeypointType.RIGHT_KNEE].y) / 2
+                val ankleY =
+                    (pose[KeypointType.LEFT_ANKLE].y + pose[KeypointType.RIGHT_ANKLE].y) / 2
+                val shin = ankleY - kneeY
+                if (shin <= Geometry.EPSILON) return@run null
+                (hipCenter.second - kneeY) / shin
+            }
+
             val hipShiftRatio = if (
                 view.isFront && hipCenter != null && ankleCenter != null &&
                 ankleSpread != null && ankleSpread > Geometry.EPSILON
@@ -393,6 +423,7 @@ data class FrameFeatures(
                 rightMedialKneeDisplacement = medialKnee(Side.RIGHT),
                 leftKneeToeDeviation = kneeToeDeviation(Side.LEFT),
                 rightKneeToeDeviation = kneeToeDeviation(Side.RIGHT),
+                shinDepthRatio = shinDepthRatio,
                 hipShiftRatio = hipShiftRatio,
                 pelvisTilt = pelvisTilt,
                 shoulderTilt = shoulderTilt,

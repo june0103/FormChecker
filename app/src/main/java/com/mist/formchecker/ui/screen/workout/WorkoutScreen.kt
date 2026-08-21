@@ -360,6 +360,8 @@ private fun HudBottomBand(
             // 자체 수집 데이터로 임계값을 확정한 첫 항목. 경고는 warnings로 따로 나간다.
             form?.hipShiftRatio?.let { add("힙쏠림 ${it.formatRatio()}") }
             // 0이 정답이므로 부호까지 보여준다 — 양수는 안쪽, 음수는 바깥이다.
+            // 게이트가 닫혀 판정이 없을 때 왜 없는지 알 수 있게 깊이를 함께 보여준다.
+            state.features?.shinDepthRatio?.let { add("깊이(정강이) ${it.formatRatio()}") }
             form?.kneeToeDeviation?.let { deviation ->
                 val state = form.kneeAlignment?.label().orEmpty()
                 add("무릎-발끝 ${deviation.formatRatio()}${if (state.isEmpty()) "" else " ($state)"}")

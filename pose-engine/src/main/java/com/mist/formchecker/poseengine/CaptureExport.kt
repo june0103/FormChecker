@@ -112,6 +112,9 @@ object CaptureExport {
         // 기준점이 정의에서 나온다.
         feature("left_knee_toe") { it.leftKneeToeDeviation }
         feature("right_knee_toe") { it.rightKneeToeDeviation }
+        // 무릎–발끝 판정의 게이트. 무릎 각도로 게이트하면 무릎을 모으는 오류가 게이트를
+        // 닫아버리므로(실측 상관 −0.586) 세로 거리만 쓰는 이 값으로 판단한다.
+        feature("shin_depth_ratio") { it.shinDepthRatio }
         feature("hip_shift_ratio") { it.hipShiftRatio }
         feature("pelvis_tilt") { it.pelvisTilt }
         feature("shoulder_tilt") { it.shoulderTilt }
