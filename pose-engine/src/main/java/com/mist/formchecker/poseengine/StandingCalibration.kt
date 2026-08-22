@@ -284,9 +284,9 @@ data class StandingCalibration(
     }
 
     enum class Problem(val message: String, val blocking: Boolean) {
-        TOO_FEW_FRAMES("자세를 유지한 시간이 짧습니다 — 다시 시도해 주세요", true),
-        SUBJECT_TOO_SMALL("카메라를 더 가까이 두세요 — 전신이 화면의 70% 이상을 차지해야 합니다", true),
-        UNSTABLE("움직임이 감지됐습니다 — 그대로 서 계세요", true),
+        TOO_FEW_FRAMES("자세를 유지한 시간이 짧았어요 — 다시 해볼까요?", true),
+        SUBJECT_TOO_SMALL("카메라를 더 가까이 두세요 — 머리부터 발까지 화면에 크게 담겨야 해요", true),
+        UNSTABLE("움직임이 있었어요 — 잠깐 그대로 서 계세요", true),
         NOT_STANDING_STRAIGHT("무릎을 곧게 펴고 서 주세요", true),
 
         /**

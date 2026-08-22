@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import com.mist.formchecker.poseengine.DepthLevel
+import com.mist.formchecker.poseengine.DepthSummary
 import com.mist.formchecker.poseengine.Finding
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.NotJudged
@@ -28,9 +29,18 @@ import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.FeedbackWarningContainer
 import com.mist.formchecker.ui.theme.Radius
 import com.mist.formchecker.ui.theme.Spacing
+import com.mist.formchecker.ui.theme.SurfaceCard
 
 /**
- * 세션 피드백 카드.
+ * 자세 피드백 카드.
+ *
+ * ## 트레이너가 말하듯 쓴다
+ * 사용자는 자세를 처음 배우는 사람이다. `rep`·`패럴렐`·`valgus` 같은 용어를 쓰지 않고,
+ * **몸으로 확인할 수 있는 말**로 바꾼다 — "패럴렐까지 앉으세요"가 아니라 "엉덩이가 무릎
+ * 높이까지 내려오면 딱 좋아요". 용어 매핑은 [FeedbackLabels]에 모아 둔다.
+ *
+ * 임계값 숫자도 문구에 넣지 않는다. "45°보다 기울었습니다"는 사용자가 확인할 수 없다 —
+ * 무엇을 어떻게 바꾸라는 말만 쓰고 숫자는 KDoc에 남긴다.
  *
  * ## 점수를 보여주지 않는다
  * "무엇이 몇 번 나왔는가"와 "그래서 무엇을 하라"만 적는다. 숫자 하나로 뭉치면 무엇을
@@ -38,31 +48,34 @@ import com.mist.formchecker.ui.theme.Spacing
  *
  * ## 문제가 없을 때 "잘했다"고 하지 않는다
  * 확정된 임계값 전부가 "정상을 오탐하지 않는가"만 검증됐고 **"오류를 잡는가"는 미검증**이다
- * (의도적 오류 세션이 아직 없다). 그래서 "경고가 난 rep이 없습니다"라는 사실로만 쓴다.
+ * (의도적 오류 세션이 아직 없다). 말투는 부드럽게 하되 **"짚을 부분이 없었다"는 사실**까지만
+ * 말한다 — "자세가 좋아요"는 데이터가 뒷받침하지 못한다.
  */
 @Composable
 fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
+    val hasFindings = report.findings.isNotEmpty()
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.lg))
-            .background(FeedbackWarningContainer.takeIf { report.findings.isNotEmpty() } ?: SurfaceTone)
+            .background(if (hasFindings) FeedbackWarningContainer else SurfaceCard)
             .padding(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        Text("자세 피드백", style = MaterialTheme.typography.titleSmall)
+        Text("오늘 자세 피드백", style = MaterialTheme.typography.titleSmall)
 
         when {
             report.judgedReps == 0 -> Text(
-                "자세를 판정할 수 있는 rep이 없었습니다. " +
-                    "카메라에 몸 전체가 들어오는지, 각도가 맞는지 확인해 주세요.",
+                "자세를 확인할 수 있는 동작이 없었어요. 카메라에 몸 전체가 들어왔는지, " +
+                    "방향이 맞는지 확인하고 다시 해볼까요?",
                 style = MaterialTheme.typography.bodyMedium,
                 color = FeedbackInfo,
             )
 
-            report.findings.isEmpty() -> Text(
-                // "자세가 좋았습니다"라고 쓰지 않는다 — 임계값이 오류를 잡는지는 미검증이다.
-                "경고가 난 rep이 없습니다. (판정한 rep ${report.judgedReps}개)",
+            !hasFindings -> Text(
+                // "자세가 좋아요"라고 쓰지 않는다 — 임계값이 오류를 잡는지는 미검증이다.
+                "${report.judgedReps}번 모두 확인했는데 따로 짚을 부분은 없었어요.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = FeedbackSuccess,
             )
@@ -72,13 +85,13 @@ fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
             }
         }
 
-        report.depth?.let { DepthLine(it.averageScore, it.levels, it.judgedReps) }
+        report.depth?.let { DepthLine(it) }
 
         if (report.notJudged.isNotEmpty()) {
             Spacer(Modifier.height(Spacing.xs))
             Text(
-                // 못 본 것을 말하지 않으면 "문제 없음"이 "전부 괜찮음"으로 읽힌다.
-                report.notJudged.notJudgedSentence(),
+                // 못 본 것을 말하지 않으면 "짚을 게 없다"가 "전부 괜찮다"로 읽힌다.
+                report.notJudged.sentence(),
                 style = MaterialTheme.typography.bodySmall,
                 color = FeedbackInfo,
             )
@@ -120,20 +133,20 @@ private fun FindingRow(finding: Finding, primary: Boolean) {
 }
 
 @Composable
-private fun DepthLine(averageScore: Float?, levels: Map<DepthLevel, Int>, judgedReps: Int) {
+private fun DepthLine(depth: DepthSummary) {
     Text(
         buildString {
-            append("깊이: ")
-            if (averageScore != null) {
-                append(String.format("패럴렐 도달률 평균 %.0f%%", averageScore * 100))
-                append(" · ")
+            append("앉은 깊이는 ")
+            depth.averageScore?.let {
+                append(String.format("목표의 평균 %.0f%%까지 내려갔어요. ", it * 100))
             }
             append(
                 DepthLevel.entries
-                    .filter { levels[it] != null }
-                    .joinToString(" / ") { "${it.label()} ${levels[it]}" },
+                    .mapNotNull { level ->
+                        depth.levels[level]?.let { "${FeedbackLabels.depth(level)} ${it}번" }
+                    }
+                    .joinToString(", ", prefix = "(", postfix = ")"),
             )
-            append(" (rep ${judgedReps}개)")
         },
         style = MaterialTheme.typography.bodySmall,
         color = FeedbackInfo,
@@ -141,69 +154,71 @@ private fun DepthLine(averageScore: Float?, levels: Map<DepthLevel, Int>, judged
 }
 
 /**
- * 무엇을 하라. **언제인지를 함께 적는다** — "무릎을 벌리세요"만으로는 서 있을 때인지
- * 앉을 때인지 알 수 없고, 실제로 문제가 생기는 시점은 최저점 근처다.
+ * 무엇을 어떻게 하라.
+ *
+ * **언제인지를 함께 말한다** — "무릎을 벌리세요"만으로는 서 있을 때인지 앉을 때인지 알 수
+ * 없고, 실제로 문제가 생기는 시점은 가장 낮게 앉았을 때다.
  *
  * 쪽이 있으면 붙인다. 실측에서 어느 쪽이 나쁜지는 사람 안에서 90~100% 일관됐다.
  */
 private fun Finding.advice(): String {
-    val side = when (this.side) {
+    val where = when (side) {
         Side.LEFT -> "왼쪽 "
         Side.RIGHT -> "오른쪽 "
         null -> ""
     }
     return when (warning) {
         FormWarning.KNEE_VALGUS ->
-            "앉을 때 ${side}무릎을 더 벌리세요. 무릎이 발끝 방향을 향해야 합니다."
+            "앉으실 때 ${where}무릎이 안쪽으로 모여요. " +
+                "무릎을 발끝 방향으로 밀어내면서 내려가 보세요."
+
         FormWarning.KNEE_FLARED ->
-            "앉을 때 ${side}무릎을 발끝 방향으로 모으세요. 지금은 발끝보다 바깥으로 벌어집니다."
+            "앉으실 때 ${where}무릎이 발끝보다 바깥으로 벌어져요. " +
+                "무릎을 발끝 방향에 맞춰 주세요."
+
         FormWarning.SHALLOW_DEPTH ->
-            "더 깊게 앉으세요. 엉덩이가 무릎 높이까지 내려가야 합니다."
+            "조금 더 깊게 앉아 주세요. 엉덩이가 무릎 높이까지 내려오면 딱 좋아요."
+
         FormWarning.EXCESSIVE_LEAN ->
-            "앉을 때 상체를 더 세우세요. 상체가 45°보다 많이 기울었습니다."
+            "내려갈 때 상체가 많이 앞으로 숙여져요. " +
+                "가슴을 들고 시선은 앞을 보면서 앉아 보세요."
+
         FormWarning.HIP_SHIFT ->
-            "체중이 한쪽으로 쏠렸습니다. 앉을 때 양발에 고르게 실으세요."
+            "체중이 한쪽 발로 쏠려요. 양발에 고르게 실으면서 앉아 주세요."
     }
 }
 
-/** 횟수를 그대로 적는다. "몇 % 이상이면 습관"이라는 경계에 근거가 없다. */
-private fun Finding.frequency(): String = when {
-    everyRep -> "판정한 rep ${judgedReps}개 모두에서 나왔습니다"
-    else -> "rep ${judgedReps}개 중 ${repCount}회"
-}
+/**
+ * 몇 번 나왔나.
+ *
+ * "자주", "가끔" 같은 말을 쓰지 않는다 — 그 경계에 근거가 없다. 횟수를 그대로 적고,
+ * 전부에서 났을 때만 "모두"라고 쓴다(그건 임계값이 아니라 사실이다).
+ */
+private fun Finding.frequency(): String =
+    if (everyRep) "확인한 ${judgedReps}번 모두에서 나왔어요" else "${judgedReps}번 중 ${repCount}번"
 
-/** 못 본 항목을 한 문장으로. 이유가 같은 것끼리 묶는다. */
-private fun List<NotJudged>.notJudgedSentence(): String {
+/**
+ * 못 본 것을 한 문장으로.
+ *
+ * 이유를 구분해서 말한다 — 각도 때문이면 **다른 방향에서 찍으면 풀리고**, 인식 문제면
+ * 각도를 바꿔도 안 풀린다. 사용자가 다음에 무엇을 바꿀지 알아야 한다.
+ */
+private fun List<NotJudged>.sentence(): String {
     val byAngle = filter { it.reason == NotJudged.Reason.CAMERA_ANGLE }
-    val noRep = filter { it.reason == NotJudged.Reason.NO_JUDGED_REP }
+        .map { FeedbackLabels.topic(it.warning) }
+        .distinct()
+    val notCaught = filter { it.reason == NotJudged.Reason.NO_JUDGED_REP }
+        .map { FeedbackLabels.topic(it.warning) }
+        .distinct()
 
     return buildString {
         if (byAngle.isNotEmpty()) {
-            append("이 각도에서는 ")
-            append(byAngle.map { it.warning.topic() }.distinct().joinToString(", "))
-            append("을 보지 못했습니다. 다른 각도로도 찍어보세요.")
+            append("이번엔 ${byAngle.joinToString(", ")}은 볼 수 없었어요. ")
+            append("카메라 방향 때문이라, 다음엔 다른 방향에서도 한 세트 찍어보시면 같이 봐드릴게요.")
         }
-        if (noRep.isNotEmpty()) {
+        if (notCaught.isNotEmpty()) {
             if (isNotEmpty()) append(" ")
-            append(noRep.map { it.warning.topic() }.distinct().joinToString(", "))
-            append("은 키포인트가 부족해 판정되지 않았습니다.")
+            append("${notCaught.joinToString(", ")}은 몸이 잘 안 잡혀서 확인하지 못했어요.")
         }
     }
 }
-
-/** 항목 이름. 무릎 두 방향은 같은 항목이라 하나로 묶는다. */
-private fun FormWarning.topic(): String = when (this) {
-    FormWarning.SHALLOW_DEPTH -> "깊이"
-    FormWarning.EXCESSIVE_LEAN -> "상체 숙임"
-    FormWarning.HIP_SHIFT -> "골반 쏠림"
-    FormWarning.KNEE_VALGUS, FormWarning.KNEE_FLARED -> "무릎 정렬"
-}
-
-private fun DepthLevel.label(): String = when (this) {
-    DepthLevel.STANDING -> "서 있음"
-    DepthLevel.SHALLOW -> "부족"
-    DepthLevel.PARALLEL -> "적정"
-    DepthLevel.DEEP -> "충분"
-}
-
-private val SurfaceTone = com.mist.formchecker.ui.theme.SurfaceCard

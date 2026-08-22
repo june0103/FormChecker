@@ -15,7 +15,8 @@
 - **추론 모델**: `app/src/main/assets/`에 두 개. **기본은 RTMPose-s Halpe26(26 keypoint)**이고 MoveNet Lightning(17 keypoint, COCO)은 비교용으로만 남아 있습니다. MoveNet에는 발 키포인트가 없어 뒤꿈치 들림·발끝 정렬을 아예 계산할 수 없습니다 — **새 판정을 추가할 때 MoveNet 경로를 가정하지 마세요.**
 - **화면**: Workout(카메라·판정·rep 카운팅·기준 자세 캘리브레이션), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·동기화 대기 배지) 완성. Splash·Home 있음
 - **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
-- **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉을 때 왼쪽 무릎을 더 벌리세요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
+- **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉으실 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
+- **사용자 문구**: `rep`·`패럴렐`·`valgus` 같은 용어와 임계값 숫자를 화면에 쓰지 않습니다. 용어 매핑은 `FeedbackLabels` 한 곳에 있고 세 화면이 공유합니다 (설계문서 5.2절). **새 문구를 넣을 때 enum 이름이 그대로 나가지 않는지 확인하세요** — `SIDE`·`SHALLOW`가 화면에 찍히고 있었습니다
 - **판정 5종**: 깊이 부족·상체 숙임(측면) / 무릎 valgus·flared·골반 쏠림(정면). `CameraAngle.supportedChecks`가 각도별로 켜고 끕니다
 - **분석 도구**: `tools/analysis/`에 `check_sessions.py`(촬영 당일 사용 가능 판정), `reference_range.py`, `variance_split.py`
 
