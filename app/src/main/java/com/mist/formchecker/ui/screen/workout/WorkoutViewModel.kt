@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import kotlin.math.abs
 
 /**
  * 관절 각도 확인 단계의 화면 상태.
@@ -269,6 +270,14 @@ class WorkoutViewModel @Inject constructor(
      */
     private val repWarnings = mutableSetOf<FormWarning>()
 
+    /**
+     * 이 rep에서 무릎 편차가 가장 컸던 쪽과 그 크기.
+     *
+     * 프레임마다 좌우 중 나쁜 쪽이 바뀔 수 있으므로 **구간 전체에서 가장 큰 편차**가 나온
+     * 쪽을 쓴다. 마지막 프레임의 쪽을 쓰면 상승 중 흔들림이 결론을 바꾼다.
+     */
+    private var repWorstKnee: Pair<Side, Float>? = null
+
     /** 추론 지연 표본. p95를 내려면 EMA가 아니라 원표본이 필요하다. */
     private val inferenceSamples = mutableListOf<Float>()
 
@@ -393,11 +402,23 @@ class WorkoutViewModel @Inject constructor(
             repMaxDepthRatio = null
             repMaxShinDepth = null
             repWarnings.clear()
+            repWorstKnee = null
         }
         // rep 구간 안이면 경고를 모은다. 선 자세·미인식 구간의 경고는 그 rep의 자세가
         // 아니므로 넣지 않는다. Completed가 뜬 프레임은 이미 STANDING으로 넘어가 있지만,
         // 그 직전 ASCENDING 프레임들이 이미 반영돼 있어 놓치는 것이 없다.
-        if (stateMachine.state in REP_PHASES) repWarnings += form.warnings
+        if (stateMachine.state in REP_PHASES) {
+            repWarnings += form.warnings
+            // 편차의 절대값이 가장 컸던 프레임의 쪽을 남긴다.
+            val side = form.kneeToeSide
+            val deviation = form.kneeToeDeviation
+            if (side != null && deviation != null) {
+                val magnitude = abs(deviation)
+                if (magnitude > (repWorstKnee?.second ?: 0f)) {
+                    repWorstKnee = side to magnitude
+                }
+            }
+        }
         form.depthRatio?.let { ratio ->
             repMaxDepthRatio = repMaxDepthRatio?.coerceAtLeast(ratio) ?: ratio
         }
@@ -491,6 +512,7 @@ class WorkoutViewModel @Inject constructor(
             minKneeAngle = summary.aggregate.minKneeAngle,
             maxTorsoLeanDegrees = summary.aggregate.maxTorsoLeanDegrees,
             validFrameRatio = summary.aggregate.validFrameRatio,
+            kneeToeSide = repWorstKnee?.first?.name,
         )
     }
 

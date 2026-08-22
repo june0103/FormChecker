@@ -32,7 +32,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
-import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackSuccess
@@ -93,10 +92,10 @@ fun SessionSummaryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Stat("rep", state.reps.size.toString())
-                        Stat("판정 가능", state.judgedReps.toString())
+                        Stat("총 횟수", state.reps.size.toString())
+                        Stat("확인한 횟수", state.judgedReps.toString())
                         Stat(
-                            label = "경고 있던 rep",
+                            label = "짚은 횟수",
                             value = state.warnedReps.toString(),
                             color = if (state.warnedReps == 0) FeedbackSuccess else FeedbackWarning,
                         )
@@ -107,21 +106,26 @@ fun SessionSummaryScreen(
                         Text(
                             // 판정 불가와 "괜찮았다"를 구분해 준다. 이 문장이 없으면
                             // 경고 0건이 자세가 좋았다는 뜻으로 읽힌다.
-                            "${unjudged}개는 자세를 판정하지 못했습니다 " +
-                                "(카메라 각도 미지원 또는 키포인트 부족).",
+                            "${unjudged}번은 자세를 확인하지 못했어요. " +
+                                "카메라에 몸이 다 들어오지 않았거나 방향이 맞지 않았을 수 있어요.",
                             style = MaterialTheme.typography.bodySmall,
                             color = FeedbackInfo,
                         )
                     }
                 }
 
+                // 리포트를 성능 카드보다 먼저 둔다 — 사용자가 이 화면에서 찾는 것은
+                // 추론 지연이 아니라 "무엇을 고쳐야 하나"다.
+                state.report?.let { SessionReportCard(it) }
+
                 state.metrics?.let { PerformanceCard(it) }
 
                 Text(
-                    "rep ${state.reps.size}개",
+                    "동작별 기록",
                     style = MaterialTheme.typography.titleSmall,
                 )
                 LazyColumn(
+                    // 카드가 늘어나도 rep 목록이 최소 높이를 갖도록 weight를 준다.
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
@@ -168,9 +172,9 @@ private fun PerformanceCard(metrics: PerformanceMetricsEntity) {
 }
 
 /**
- * rep 한 줄. 판정 사실만 적는다.
+ * 동작 한 줄. 판정 사실만 적는다.
  *
- * `checked_count`가 0이면 "판정 불가"로 명시한다 — 경고가 없는 것과 재지 못한 것이
+ * `checked_count`가 0이면 **"확인 못 함"으로 명시한다** — "짚을 것 없음"과 재지 못한 것이
  * 같아 보이면 안 된다 (설계문서 4.2절).
  */
 @Composable
@@ -197,19 +201,20 @@ private fun RepRow(rep: RepRecordEntity) {
             Column(Modifier.weight(1f)) {
                 Text(
                     buildString {
-                        append(String.format("%.1fs", rep.durationMs / 1000f))
+                        append(String.format("%.1f초", rep.durationMs / 1000f))
                         append(" · ")
-                        append(rep.cameraAngle)
-                        rep.depthLevel?.let { append(" · 깊이 $it") }
+                        // SIDE·SHALLOW 같은 enum 이름을 그대로 보여주고 있었다.
+                        append(FeedbackLabels.angle(rep.cameraAngle))
+                        rep.depthLevel?.let { append(" · ${FeedbackLabels.depth(it)}") }
                         rep.depthScore?.let { append(String.format(" (%.0f%%)", it * 100)) }
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
                     when {
-                        rep.checkedCount == 0 -> "판정 불가"
-                        warned.isEmpty() -> "경고 없음 (판정 ${rep.checkedCount}항목)"
-                        else -> warned.joinToString(", ") { it.shortLabel() }
+                        rep.checkedCount == 0 -> "확인 못 함"
+                        warned.isEmpty() -> "짚을 것 없음"
+                        else -> warned.joinToString(", ") { FeedbackLabels.shortName(it) }
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = tone,
@@ -217,15 +222,6 @@ private fun RepRow(rep: RepRecordEntity) {
             }
         }
     }
-}
-
-/** 목록에 넣을 짧은 이름. 경고 문장 전체는 운동 중 화면에서 쓴다. */
-private fun FormWarning.shortLabel(): String = when (this) {
-    FormWarning.SHALLOW_DEPTH -> "깊이 부족"
-    FormWarning.EXCESSIVE_LEAN -> "상체 숙임"
-    FormWarning.HIP_SHIFT -> "골반 쏠림"
-    FormWarning.KNEE_VALGUS -> "무릎 모임"
-    FormWarning.KNEE_FLARED -> "무릎 벌어짐"
 }
 
 @Composable

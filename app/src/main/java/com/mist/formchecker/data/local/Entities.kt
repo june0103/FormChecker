@@ -162,6 +162,14 @@ data class RepRecordEntity(
     @ColumnInfo(name = "max_torso_lean") val maxTorsoLeanDegrees: Float?,
     /** 각도를 얻은 프레임 비율. 낮으면 이 rep 자체를 믿을 수 없다. */
     @ColumnInfo(name = "valid_frame_ratio") val validFrameRatio: Float,
+    /**
+     * 무릎 편차가 가장 컸던 쪽. 사람 기준 좌/우(화면 아님). 무릎 경고가 없으면 null.
+     *
+     * 세션 리포트가 "왼쪽 무릎을 더 벌리세요"라고 쪽을 붙이는 데 쓴다. 실측에서 어느 쪽이
+     * 나쁜지는 사람 안에서 90~100% 일관됐으므로(9세션 중 8개) 세션 단위로 모으면 쪽을
+     * 지목할 수 있다.
+     */
+    @ColumnInfo(name = "knee_toe_side") val kneeToeSide: String? = null,
 
     @ColumnInfo(name = "sync_status") val syncStatus: SyncStatus = SyncStatus.PENDING,
 )

@@ -79,7 +79,7 @@ fun HistoryScreen(
         if (state.sessions.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Text(
-                    "아직 기록이 없습니다.\n운동을 마치면 여기에 쌓입니다.",
+                    "아직 기록이 없어요.\n운동을 마치면 여기에 하나씩 쌓여요.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = FeedbackInfo,
                 )
@@ -112,7 +112,8 @@ fun HistoryScreen(
 @Composable
 private fun PendingBadge(count: Int) {
     Text(
-        "동기화 대기 ${count}건",
+        // "동기화"는 개발자 말이다. 사용자에게는 "아직 안 올라간 것"이 전부다.
+        "업로드 대기 ${count}건",
         style = MaterialTheme.typography.labelMedium,
         color = FeedbackWarning,
         modifier = Modifier
@@ -149,11 +150,10 @@ private fun SessionRow(item: SessionListItem, onOpen: () -> Unit, onDelete: () -
                 Spacer(Modifier.height(Spacing.xs))
                 Text(
                     buildString {
-                        append("rep ${item.repCount}개")
+                        append("${item.repCount}번")
                         if (item.repCount > 0) {
-                            append(" · 경고 ${item.warnedRepCount}개")
+                            append(" · 짚은 곳 ${item.warnedRepCount}번")
                         }
-                        item.session.poseModel?.let { append(" · $it") }
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (item.warnedRepCount == 0 && item.repCount > 0) {
@@ -175,7 +175,7 @@ private fun SessionRow(item: SessionListItem, onOpen: () -> Unit, onDelete: () -
         Spacer(Modifier.height(Spacing.xs))
         TextButton(onClick = { if (confirming) onDelete() else confirming = true }) {
             Text(
-                if (confirming) "정말 삭제할까요? 한 번 더 누르세요" else "삭제",
+                if (confirming) "정말 지울까요? 한 번 더 누르시면 삭제돼요" else "삭제",
                 style = MaterialTheme.typography.labelSmall,
                 color = FeedbackDanger,
             )

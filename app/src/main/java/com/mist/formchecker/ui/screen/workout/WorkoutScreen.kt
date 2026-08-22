@@ -45,6 +45,7 @@ import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.SquatForm
+import com.mist.formchecker.ui.screen.FeedbackLabels
 import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -686,14 +687,18 @@ private fun CalibrationBar(
                 OutlinedButton(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("기준 자세 다시 측정") }
+                ) { Text("기준 자세 다시 재기") }
             }
 
             CalibrationStage.NONE -> {
                 Text(
-                    text = "기준 자세를 재지 않았습니다 — 무릎 정렬과 골반 쏠림은 " +
-                        "그대로 판정하지만(발목 간격 기준), 깊이와 상체 숙임은 몸 크기로 " +
-                        "정규화할 수 없어 각도 기준으로 대체합니다.",
+                    // 이 문구는 #24 이전 동작을 설명하고 있었다("각도 기준으로 대체").
+                    // 각도 경로는 제거됐고 이제 정강이 길이로 정규화한다 — 기준 자세가
+                    // 없어도 판정은 되고, 다리 길이 대신 매 프레임 정강이를 쓰므로
+                    // 값이 조금 더 흔들린다.
+                    text = "기준 자세를 아직 안 재셨어요. 이대로도 자세는 봐드리지만, " +
+                        "키와 다리 길이를 몰라서 앉은 깊이가 조금 덜 정확할 수 있어요. " +
+                        "3초만 서 계시면 더 정확해져요.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted,
                 )
@@ -701,7 +706,7 @@ private fun CalibrationBar(
                 Button(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("기준 자세 측정 (3초)") }
+                ) { Text("기준 자세 재기 (3초)") }
             }
         }
     }
@@ -746,12 +751,13 @@ private fun DepthBasis.suffix(): String = when (this) {
     DepthBasis.SHIN_LENGTH -> "(정강이)"
 }
 
-private fun DepthLevel.label(): String = when (this) {
-    DepthLevel.STANDING -> "서 있음"
-    DepthLevel.SHALLOW -> "부족"
-    DepthLevel.PARALLEL -> "적정"
-    DepthLevel.DEEP -> "충분"
-}
+/**
+ * 깊이 단계 이름. [FeedbackLabels]에 위임한다.
+ *
+ * 여기에 따로 적어 두면 운동 중 화면과 결과 리포트가 같은 단계를 다르게 부른다 —
+ * 실제로 "부족/적정/충분"과 "얕음/적당/깊음"으로 갈려 있었다.
+ */
+private fun DepthLevel.label(): String = FeedbackLabels.depth(this)
 
 private fun KneeAlignment.label(): String = when (this) {
     KneeAlignment.GOOD -> "정상"
