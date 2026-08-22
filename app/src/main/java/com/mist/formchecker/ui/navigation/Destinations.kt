@@ -42,6 +42,19 @@ data class SessionSummary(val sessionId: String)
  * 정상이었는지 알 수 없다), 캘리브레이션이 절차를 강제해야 하며, 운동 화면은 제품이므로
  * 수집용 컨트롤이 남아 있으면 안 된다.
  */
+/**
+ * 개발·검증용 운동 화면.
+ *
+ * [Workout]과 **판정은 같고 표시만 다르다** — 둘 다 `WorkoutViewModel` 하나를 쓴다.
+ * 여기에는 관절 각도·정규화 원값·추론 지연 같은 수치가 올라간다. 임계값을 실측으로
+ * 확정하는 동안 기기 화면에서 확인해야 했던 값들이고(`기술선택_기록.md` 여러 항목이
+ * 그렇게 나왔다), 새 판정을 추가할 때 다시 필요하다.
+ *
+ * 사용자에게는 보이지 않는다. 홈에서 별도 항목으로만 들어간다.
+ */
+@Serializable
+data object WorkoutLab
+
 @Serializable
 data object Capture
 
