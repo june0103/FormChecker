@@ -39,6 +39,8 @@ import com.mist.formchecker.poseengine.SquatFormAnalyzer
 import com.mist.formchecker.poseengine.StandingCalibration
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,6 +127,25 @@ data class WorkoutUiState(
     val calibration: StandingCalibration? = null,
     /** 남은 유지 시간(ms). 화면에 카운트다운으로 보여준다. */
     val calibrationRemainingMs: Long = 0,
+
+    /**
+     * 측정 시작까지 줄 준비 시간(초). 사용자가 고른다.
+     *
+     * 기본 5초는 팔을 뻗어 버튼을 누르고 물러서는 거리를 기준으로 한 잠정값이다. 삼각대
+     * 위치나 방 크기에 따라 크게 달라지므로 고를 수 있게 두었다.
+     */
+    val calibrationPrepSeconds: Int = CalibrationPrep.DEFAULT_SECONDS,
+
+    /** 준비 시간 카운트다운 잔여(ms). [CalibrationStage.PREPARING]에서만 의미가 있다. */
+    val calibrationPrepRemainingMs: Long = 0,
+
+    /**
+     * 지금 프레임에서 기준 자세에 필요한 관절이 전부 보이나.
+     *
+     * 준비 시간 동안 이걸 보여주면 사용자가 **카운트다운이 끝나기 전에** 자기 위치를 고칠
+     * 수 있다. 없으면 3초를 다 기다린 뒤에야 실패를 알게 된다.
+     */
+    val calibrationSubjectVisible: Boolean = false,
     val calibrationProblems: List<StandingCalibration.Problem> = emptyList(),
     /**
      * 측면에서 카메라에 가까운 쪽. 캘리브레이션에서 정하고 그 뒤 바꾸지 않는다.
@@ -171,9 +192,42 @@ data class WorkoutUiState(
  * 그래서 기준선은 **선택**이고, 없으면 정규화된 판정만 못 한다는 사실을 화면에 알린다.
  * 문서 §2.3이 카운팅과 자세 평가를 분리한 것과 같은 이유다.
  */
+/**
+ * 기준 자세 측정 전에 줄 준비 시간.
+ *
+ * `WorkoutViewModel`의 companion이 아니라 밖에 두는 이유: `WorkoutUiState`의 기본값이
+ * 이 값을 참조하는데, 그 데이터 클래스는 ViewModel보다 먼저 선언된다.
+ */
+object CalibrationPrep {
+    /** 기본값(초). 팔을 뻗어 버튼을 누르고 물러서는 거리를 기준으로 한 잠정값이다. */
+    const val DEFAULT_SECONDS = 5
+
+    /**
+     * 고를 수 있는 값(초).
+     *
+     * 0은 "카메라가 이미 나를 보고 있다"(삼각대를 앞에 두고 화면에 손이 닿는 경우)를 위한
+     * 값이다. 없애면 그런 배치에서도 매번 기다려야 한다.
+     */
+    val OPTIONS = listOf(0, 3, 5, 10)
+
+    /** 카운트다운 갱신 주기(ms). 초 단위 표시라 이보다 잘게 볼 이유가 없다. */
+    const val TICK_MS = 100L
+}
+
 enum class CalibrationStage {
     /** 아직 재지 않음. 카운팅은 정상 동작한다. */
     NONE,
+
+    /**
+     * 카메라 앞으로 이동할 시간을 주는 중. **아직 재지 않는다.**
+     *
+     * ## 왜 필요한가
+     * 버튼은 손이 닿는 곳에서 누르고, 측정은 전신이 보이는 자리에서 해야 한다. 그 사이를
+     * 걸어가는 동안 [COLLECTING]이 돌면 두 가지가 일어난다 — 관절이 안 잡히는 동안은
+     * 타이머가 계속 리셋되고, **몸이 잡힌 직후 아직 자세를 잡는 중에 3초 창이 시작돼**
+     * 흔들림으로 `UNSTABLE` 실패가 난다. 실기에서 이것 때문에 반복 실패했다.
+     */
+    PREPARING,
 
     /** 선 자세를 모으는 중. */
     COLLECTING,
@@ -277,6 +331,9 @@ class WorkoutViewModel @Inject constructor(
      * 쪽을 쓴다. 마지막 프레임의 쪽을 쓰면 상승 중 흔들림이 결론을 바꾼다.
      */
     private var repWorstKnee: Pair<Side, Float>? = null
+
+    /** 준비 시간 카운트다운. 취소·재시작·화면 이탈 시 반드시 끊어야 한다. */
+    private var prepJob: Job? = null
 
     /** 추론 지연 표본. p95를 내려면 EMA가 아니라 원표본이 필요하다. */
     private val inferenceSamples = mutableListOf<Float>()
@@ -431,8 +488,19 @@ class WorkoutViewModel @Inject constructor(
 
         // 카운팅과 독립적으로 돌린다. 기준선을 재는 중에도 rep은 세어져야 한다 — 사용자가
         // 기준 자세를 잡는 동안 운동을 멈추라고 요구할 이유가 없다.
-        if (_uiState.value.calibrationStage == CalibrationStage.COLLECTING) {
-            stepCalibration(result)
+        when (_uiState.value.calibrationStage) {
+            CalibrationStage.COLLECTING -> stepCalibration(result)
+            // 준비 중에는 재지 않는다. 대신 지금 서 있는 자리가 되는지만 알려준다 —
+            // 카운트다운이 끝나기 전에 위치를 고칠 수 있어야 한다.
+            CalibrationStage.PREPARING -> {
+                val visible = StandingCalibration.REQUIRED.all {
+                    result.pose.isReliable(it, StandingCalibration.MIN_CONFIDENCE)
+                }
+                if (visible != _uiState.value.calibrationSubjectVisible) {
+                    _uiState.update { it.copy(calibrationSubjectVisible = visible) }
+                }
+            }
+            else -> Unit
         }
 
         // rep 깊이는 상태와 저장이 같은 값을 써야 하므로 여기서 한 번만 계산한다.
@@ -557,13 +625,35 @@ class WorkoutViewModel @Inject constructor(
 
     // ── 기준 자세 ───────────────────────────────────────────
 
-    /** 기준 자세 측정을 시작한다. 이미 있으면 다시 잰다 — 카메라를 옮겼으면 기준선도 바뀐다. */
+    /** 준비 시간을 바꾼다. 측정 중에는 바꾸지 않는다 — 진행 중인 카운트다운이 흔들린다. */
+    fun selectCalibrationPrepSeconds(seconds: Int) {
+        if (_uiState.value.calibrationStage == CalibrationStage.PREPARING) return
+        _uiState.update { it.copy(calibrationPrepSeconds = seconds) }
+    }
+
+    /**
+     * 기준 자세 측정을 시작한다. 이미 있으면 다시 잰다 — 카메라를 옮겼으면 기준선도 바뀐다.
+     *
+     * **바로 재지 않고 준비 시간을 준다.** 버튼을 누른 자리와 서야 할 자리가 다르기 때문이다
+     * ([CalibrationStage.PREPARING] 참고). 준비 시간이 0이면 곧바로 수집으로 넘어간다.
+     */
     fun startCalibration() {
         calibrationFrames.clear()
         calibrationStartMs = null
+        prepJob?.cancel()
+
+        val prepMs = _uiState.value.calibrationPrepSeconds * 1_000L
+        if (prepMs <= 0) {
+            beginCollecting()
+            return
+        }
+
         _uiState.update {
             it.copy(
-                calibrationStage = CalibrationStage.COLLECTING,
+                calibrationStage = CalibrationStage.PREPARING,
+                calibrationPrepRemainingMs = prepMs,
+                // 지난 측정의 값이 남아 있으면 아직 화면 밖인데 "자리 좋아요"가 뜬다.
+                calibrationSubjectVisible = false,
                 calibrationRemainingMs = CALIBRATION_DURATION_MS,
                 calibrationProblems = emptyList(),
                 // 재측정 중에는 이전 기준선을 지운다. 옛 분모로 계산한 값이 화면에
@@ -573,15 +663,48 @@ class WorkoutViewModel @Inject constructor(
                 features = null,
             )
         }
+
+        // 카운트다운은 프레임이 아니라 벽시계로 센다. 프레임이 끊겨도 "5초"는 5초여야 하고,
+        // 준비 구간에는 사람이 화면 밖에 있어 프레임이 안 들어올 수 있다.
+        prepJob = viewModelScope.launch {
+            var remaining = prepMs
+            while (remaining > 0) {
+                delay(CalibrationPrep.TICK_MS)
+                remaining -= CalibrationPrep.TICK_MS
+                _uiState.update {
+                    it.copy(calibrationPrepRemainingMs = remaining.coerceAtLeast(0))
+                }
+            }
+            beginCollecting()
+        }
+    }
+
+    /** 준비가 끝났다. 여기서부터 실제로 프레임을 모은다. */
+    private fun beginCollecting() {
+        calibrationFrames.clear()
+        calibrationStartMs = null
+        _uiState.update {
+            it.copy(
+                calibrationStage = CalibrationStage.COLLECTING,
+                calibrationRemainingMs = CALIBRATION_DURATION_MS,
+                calibrationPrepRemainingMs = 0,
+                calibrationProblems = emptyList(),
+                calibration = null,
+                activeSide = null,
+                features = null,
+            )
+        }
     }
 
     fun cancelCalibration() {
+        prepJob?.cancel()
         calibrationFrames.clear()
         calibrationStartMs = null
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.NONE,
                 calibrationRemainingMs = 0,
+                calibrationPrepRemainingMs = 0,
                 calibrationProblems = emptyList(),
             )
         }
@@ -825,6 +948,7 @@ class WorkoutViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        prepJob?.cancel()
         super.onCleared()
         engine?.close()
         engine = null
@@ -843,6 +967,7 @@ class WorkoutViewModel @Inject constructor(
          * 가만히 서 있기를 요구하는 시간으로도 짧다.
          */
         const val CALIBRATION_DURATION_MS = 3_000L
+
 
         /** 표시용 스무딩 계수. 값이 클수록 최근 프레임에 민감해진다. */
         const val EMA_ALPHA = 0.2

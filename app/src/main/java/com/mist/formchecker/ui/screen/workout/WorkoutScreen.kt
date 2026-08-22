@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -182,6 +183,7 @@ private fun WorkoutContent(
             state = state,
             onStart = viewModel::startCalibration,
             onCancel = viewModel::cancelCalibration,
+            onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
         )
 
         // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
@@ -641,6 +643,7 @@ private fun CalibrationBar(
     state: WorkoutUiState,
     onStart: () -> Unit,
     onCancel: () -> Unit,
+    onSelectPrepSeconds: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -648,16 +651,40 @@ private fun CalibrationBar(
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         when (state.calibrationStage) {
+            CalibrationStage.PREPARING -> {
+                val seconds = (state.calibrationPrepRemainingMs + 999) / 1000
+                Text(
+                    text = "카메라 앞에 서 주세요 — ${seconds}초 후 측정을 시작해요",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LimeGreen,
+                )
+                Text(
+                    // 카운트다운이 끝나기 전에 자기 위치를 고칠 수 있어야 한다.
+                    // 이 줄이 없으면 3초를 더 기다린 뒤에야 실패를 알게 된다.
+                    text = if (state.calibrationSubjectVisible) {
+                        "지금 자리 좋아요. 그대로 곧게 서 계세요."
+                    } else {
+                        "아직 전신이 다 안 보여요. 머리부터 발까지 화면에 들어오게 서 주세요."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (state.calibrationSubjectVisible) LimeGreen else FeedbackWarning,
+                )
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+                ) { Text("취소") }
+            }
+
             CalibrationStage.COLLECTING -> {
                 val seconds = (state.calibrationRemainingMs + 999) / 1000
                 Text(
-                    text = "곧게 서서 그대로 계세요 — ${seconds}초",
+                    text = "그대로 계세요 — ${seconds}초",
                     style = MaterialTheme.typography.bodyMedium,
                     color = LimeGreen,
                 )
                 Text(
                     // 다시 채워지는 이유를 알려줘야 사용자가 자세를 고칠 수 있다.
-                    text = "필수 관절이 가려지면 처음부터 다시 셉니다.",
+                    text = "몸이 가려지면 처음부터 다시 세요.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted,
                 )
@@ -703,10 +730,60 @@ private fun CalibrationBar(
                     color = TextMuted,
                 )
                 state.calibrationProblems.forEach { CalibrationProblemRow(it) }
+                PrepSecondsPicker(
+                    selected = state.calibrationPrepSeconds,
+                    onSelect = onSelectPrepSeconds,
+                )
                 Button(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("기준 자세 재기 (3초)") }
+                ) {
+                    Text(
+                        if (state.calibrationPrepSeconds > 0) {
+                            "기준 자세 재기 (${state.calibrationPrepSeconds}초 후 시작)"
+                        } else {
+                            "기준 자세 재기"
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 준비 시간 선택.
+ *
+ * 고를 수 있게 둔 이유: 버튼을 누른 자리와 서야 할 자리 사이의 거리가 사람마다 다르다.
+ * 삼각대를 앞에 두고 화면에 손이 닿으면 0초가 맞고, 방 건너편에 두었으면 10초도 짧다.
+ * 하나로 고정하면 한쪽은 매번 기다리고 다른 쪽은 매번 실패한다.
+ */
+@Composable
+private fun PrepSecondsPicker(selected: Int, onSelect: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "준비 시간",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+        )
+        CalibrationPrep.OPTIONS.forEach { seconds ->
+            val active = seconds == selected
+            OutlinedButton(
+                onClick = { onSelect(seconds) },
+                modifier = Modifier.height(TouchTarget.minSize),
+                contentPadding = CompactButtonPadding,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (active) LimeGreen else TextMuted,
+                ),
+            ) {
+                Text(
+                    if (seconds == 0) "바로" else "${seconds}초",
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
         }
     }
