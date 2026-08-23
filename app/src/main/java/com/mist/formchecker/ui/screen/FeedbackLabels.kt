@@ -3,9 +3,11 @@ package com.mist.formchecker.ui.screen
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.HeldWarning
 import com.mist.formchecker.poseengine.ReadyCheck
 import com.mist.formchecker.poseengine.ReadyIssue
 import com.mist.formchecker.poseengine.ReadyPosture
+import com.mist.formchecker.poseengine.Side
 
 /**
  * 사용자에게 보이는 말.
@@ -33,6 +35,39 @@ object FeedbackLabels {
         FormWarning.KNEE_VALGUS -> "무릎 모임"
         FormWarning.KNEE_FLARED -> "무릎 벌어짐"
     }
+
+    /**
+     * 운동 중 화면에 띄우는 지시. **짧아야 한다.**
+     *
+     * ## 왜 리포트 문장과 따로 두는가
+     * 읽는 조건이 다르다. 리포트는 앉아서 읽고, 이 문구는 **스쿼트를 하면서 몇 걸음 떨어진
+     * 화면을 흘깃 보고** 읽는다. 같은 내용이라도 길이가 달라야 한다 — 예전 문구
+     * "왼쪽 무릎을 발끝 방향으로 모아주세요"는 18자로, 그 조건에서 읽을 수 없었다.
+     *
+     * ## 방향을 지우지 않는다
+     * [FormWarning.KNEE_FLARED]를 그냥 "무릎을 모으세요"로 줄이면 **반대 오류를 지시하게
+     * 된다** — "모으다"는 무릎이 안으로 무너지는 방향이다. 무릎이 가야 하는 곳은 발끝이므로
+     * 길이를 줄이더라도 "발끝 쪽"은 남긴다.
+     *
+     * @param side 사람 기준 좌/우(화면 아님). 무릎 계열에만 붙는다 — [HeldWarning]이
+     *   경고가 났던 시점의 쪽을 들고 있다.
+     */
+    fun cue(warning: FormWarning, side: Side? = null): String {
+        val body = when (warning) {
+            FormWarning.SHALLOW_DEPTH -> "더 깊게 앉으세요"
+            FormWarning.EXCESSIVE_LEAN -> "상체를 세우세요"
+            // 쏠림은 밀어 올리는 순간에 드러난다 — "서세요"보다 "일어서세요"가 그
+            // 순간을 가리킨다.
+            FormWarning.HIP_SHIFT -> "양발로 고르게 일어서세요"
+            FormWarning.KNEE_VALGUS -> "무릎을 벌리세요"
+            FormWarning.KNEE_FLARED -> "무릎을 발끝 쪽으로"
+        }
+        // "무릎을 벌리세요"보다 "왼쪽 무릎을 벌리세요"가 실행 가능한 지시다.
+        if (side == null) return body
+        return "${if (side == Side.LEFT) "왼쪽" else "오른쪽"} $body"
+    }
+
+    fun cue(held: HeldWarning): String = cue(held.warning, held.side)
 
     /**
      * 항목 이름. "무엇을 봤는가 / 못 봤는가"를 말할 때 쓴다.

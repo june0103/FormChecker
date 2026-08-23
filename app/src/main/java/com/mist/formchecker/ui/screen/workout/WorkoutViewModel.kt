@@ -16,7 +16,9 @@ import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FootSample
 import com.mist.formchecker.poseengine.FormCheck
+import com.mist.formchecker.poseengine.FeedbackHold
 import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.HeldWarning
 import com.mist.formchecker.poseengine.KeypointType
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.MedianWindow
@@ -94,6 +96,14 @@ data class WorkoutUiState(
     val cameraAngle: CameraAngle = CameraAngle.SIDE,
     val result: PoseResult? = null,
     val form: SquatForm? = null,
+    /**
+     * 화면에 보여줄 자세 피드백. **[form]의 경고를 그대로 쓰지 않는다.**
+     *
+     * 프레임 단위 경고는 그 자세를 유지하는 동안만 참이라, 최저점에서 난 경고가 다 올라온
+     * 뒤에는 이미 사라져 있다(실측 상승 구간 p95 1,171ms). [FeedbackHold]가 읽을 수 있는
+     * 시간만큼 붙잡아 두고, 한 항목에 하나만 남긴다.
+     */
+    val heldWarnings: List<HeldWarning> = emptyList(),
     // ── rep 카운팅 ──────────────────────────────────────────
     /** 완주한 rep 수. 카메라·모델 전환으로 상태머신을 재설정해도 유지된다. */
     val repCount: Int = 0,
@@ -274,6 +284,14 @@ class WorkoutViewModel @Inject constructor(
     // ── rep 카운팅 ──────────────────────────────────────────
 
     private val countingThresholds = CountingThresholds()
+
+    /**
+     * 자세 피드백을 화면에 붙잡아 두는 장치.
+     *
+     * 카운팅 스무딩과 나란히 둔다 — 둘 다 "프레임마다 튀는 것을 사람이 볼 수 있게 만드는"
+     * 일이고, 판정 자체는 건드리지 않는다.
+     */
+    private val feedbackHold = FeedbackHold()
 
     /** 상태 전이 안정화용. 위상 지연이 있어 최저점 탐색에는 쓰지 않는다. */
     private val kneeEma = AngleEma(config.smoothing.emaTimeConstantMs)
@@ -489,6 +507,14 @@ class WorkoutViewModel @Inject constructor(
             features = features,
         )
 
+        // 프레임마다 부른다 — 경고가 없는 프레임에서 만료가 일어나므로, 있을 때만 부르면
+        // 마지막 경고가 영원히 남는다.
+        val heldWarnings = feedbackHold.update(
+            warnings = form.warnings,
+            side = form.kneeToeSide,
+            nowMs = result.timestampMs,
+        )
+
         val event = stateMachine.update(buildRepFrame(result, form))
 
         // rep이 시작될 때 비우고 그 뒤로 최댓값을 쌓는다. 시작 프레임부터 모아야 하므로
@@ -576,6 +602,7 @@ class WorkoutViewModel @Inject constructor(
             var next = state.copy(
                 result = result,
                 form = form,
+                heldWarnings = heldWarnings,
                 features = features,
                 repState = stateMachine.state,
                 analysisFps = fps,
@@ -970,6 +997,9 @@ class WorkoutViewModel @Inject constructor(
     /** 카메라·모델 전환처럼 시계열이 끊기는 경우 스무딩과 상태머신을 초기화한다. */
     private fun resetRepTracking() {
         stateMachine.reset()
+        // 시계열이 끊기면 붙잡아 둔 경고도 버린다 — 카메라를 바꿨다면 그 경고는 이미
+        // 다른 화면을 보고 낸 판정이다.
+        feedbackHold.reset()
         kneeEma.reset()
         kneeMedian.reset()
         smoothedFrameIntervalMs = 0.0
@@ -997,6 +1027,7 @@ class WorkoutViewModel @Inject constructor(
                 // 렌즈가 바뀌면 직전 프레임의 스켈레톤이 잠깐 남아 어색하므로 지운다.
                 result = null,
                 form = null,
+                heldWarnings = emptyList(),
                 repState = RepState.IDLE,
             )
         }
@@ -1024,6 +1055,9 @@ class WorkoutViewModel @Inject constructor(
             it.copy(
                 cameraAngle = angle,
                 form = null,
+                // 각도가 바뀌면 판정 항목이 갈린다. 이전 각도의 경고를 남겨두면 지금
+                // 각도에서는 재지도 않는 항목을 지적한다.
+                heldWarnings = emptyList(),
                 repState = RepState.IDLE,
                 calibrationStage = CalibrationStage.NONE,
                 calibration = null,

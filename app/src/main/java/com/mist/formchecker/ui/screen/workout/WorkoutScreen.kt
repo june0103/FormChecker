@@ -351,7 +351,7 @@ private fun HudBottomBand(
             )
         }
 
-        form?.warnings?.forEach { FormWarningRow(it, side = form.kneeToeSide) }
+        state.heldWarnings.forEach { FormWarningRow(it) }
 
         val angle = knees?.representative
         Text(

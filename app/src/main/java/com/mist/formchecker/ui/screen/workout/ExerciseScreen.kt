@@ -169,6 +169,9 @@ private fun ExerciseContent(
             onStart = viewModel::startCalibration,
             onCancel = viewModel::cancelCalibration,
             onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
+            // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
+            // 떨어져 서서 쓰는 화면이라, 그 거리에서 못 읽는 글씨는 자리만 차지한다.
+            collapseDetails = true,
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -253,7 +256,9 @@ private fun ExerciseHud(
             state.lastRepDepth?.let {
                 Text(
                     text = "직전 깊이 ${it.label()}",
-                    style = MaterialTheme.typography.labelMedium,
+                    // 횟수 다음으로 자주 보는 줄이다. labelMedium(13sp)은 떨어지면
+                    // 읽히지 않았다.
+                    style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
             }
@@ -292,7 +297,7 @@ private fun ExerciseHud(
                 )
             }
 
-            form?.warnings?.forEach { FormWarningRow(it, side = form.kneeToeSide) }
+            state.heldWarnings.forEach { FormWarningRow(it) }
 
             // 인식이 안 될 때만 말한다. 잘 되고 있을 때 "인식 중"을 띄우면 화면만 시끄럽다.
             val trouble = when (form?.visibility) {
@@ -304,8 +309,10 @@ private fun ExerciseHud(
             }
             trouble?.let {
                 Text(
+                    // 인식이 끊긴 것은 떨어져 선 자리에서 알아야 한다 — 모르면 계속
+                    // 세어지지 않는 스쿼트를 한다.
                     text = it,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
             }

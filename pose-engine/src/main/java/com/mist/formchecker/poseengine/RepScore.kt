@@ -66,16 +66,11 @@ object RepScorer {
      * [CameraAngle.supportedChecks]에서 파생시킨다 — 두 곳에 나눠 적으면 각도별 항목이
      * 바뀔 때 한쪽만 고치는 실수가 생긴다.
      */
-    fun checksFor(cameraAngle: CameraAngle): Set<FormWarning> = buildSet {
-        if (cameraAngle.supports(FormCheck.DEPTH)) add(FormWarning.SHALLOW_DEPTH)
-        if (cameraAngle.supports(FormCheck.TORSO_LEAN)) add(FormWarning.EXCESSIVE_LEAN)
-        if (cameraAngle.supports(FormCheck.SYMMETRY)) add(FormWarning.HIP_SHIFT)
-        if (cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
-            // 무릎 정렬은 한 항목인데 방향이 둘이다. 둘 다 켜고 끄기가 같이 움직인다.
-            add(FormWarning.KNEE_VALGUS)
-            add(FormWarning.KNEE_FLARED)
-        }
-    }
+    fun checksFor(cameraAngle: CameraAngle): Set<FormWarning> =
+        // 무릎 정렬처럼 한 항목에 방향이 둘인 경우도 자동으로 함께 켜지고 꺼진다 —
+        // 경고마다 어느 항목인지 [FormWarning.check]가 들고 있기 때문이다. 매핑을 여기
+        // 따로 적어두면 항목이 바뀔 때 한쪽만 고치는 실수가 생긴다.
+        FormWarning.entries.filter { cameraAngle.supports(it.check) }.toSet()
 
     /**
      * 선 자세 경계를 0, 패럴렐을 1로 놓고 정규화한다.
