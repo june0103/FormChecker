@@ -27,6 +27,7 @@ import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepFrame
 import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.RepState
+import com.mist.formchecker.poseengine.ReadyPosture
 import com.mist.formchecker.poseengine.RepStateMachine
 import com.mist.formchecker.poseengine.RepSummary
 import com.mist.formchecker.poseengine.RtmPoseEngine
@@ -147,6 +148,14 @@ data class WorkoutUiState(
      * 수 있다. 없으면 3초를 다 기다린 뒤에야 실패를 알게 된다.
      */
     val calibrationSubjectVisible: Boolean = false,
+    /**
+     * 준비 자세 점검. 기준 자세를 재는 동안 **실시간으로** 갱신되고, 측정이 끝나면
+     * 창 전체로 다시 계산한 값이 들어온다.
+     *
+     * 실시간으로 보여주는 이유는 [calibrationSubjectVisible]과 같다 — 측정이 끝난 뒤에
+     * "발이 좁았어요"라고 말하면 사용자는 이미 스쿼트를 시작한 뒤다.
+     */
+    val readyPosture: ReadyPosture = ReadyPosture.EMPTY,
     val calibrationProblems: List<StandingCalibration.Problem> = emptyList(),
     /**
      * 측면에서 카메라에 가까운 쪽. 캘리브레이션에서 정하고 그 뒤 바꾸지 않는다.
@@ -235,6 +244,10 @@ enum class CalibrationStage {
 
     /** 기준선 확보. */
     READY,
+    ;
+
+    /** 지금 기준 자세를 재는 중인가. 준비 자세 안내를 켤 구간이다. */
+    val isMeasuring: Boolean get() = this == PREPARING || this == COLLECTING
 }
 
 @HiltViewModel
@@ -359,6 +372,20 @@ class WorkoutViewModel @Inject constructor(
     /** 캘리브레이션 창에 모인 프레임. (pose, aspectRatio). */
     private val calibrationFrames = mutableListOf<Pair<Pose, Float>>()
     private var calibrationStartMs: Long? = null
+
+    /**
+     * 준비 자세 점검용 최근 프레임. **캘리브레이션 창과 별개로 돈다.**
+     *
+     * 두 가지 이유로 따로 둔다.
+     * 1. 준비 시간([CalibrationStage.PREPARING])에는 `calibrationFrames`를 채우지 않는데,
+     *    사용자가 자세를 고칠 수 있어야 하는 구간이 바로 거기다.
+     * 2. 캘리브레이션 창은 필수 관절이 하나만 빠져도 **처음부터 다시 모은다.** 그 규칙을
+     *    안내에 그대로 쓰면 몸이 잠깐 가려질 때마다 안내가 사라진다.
+     *
+     * 크기는 [READY_WINDOW_FRAMES]. 중앙값을 낼 만큼 크고, 사용자가 발을 옮기면 1초 안에
+     * 반영될 만큼 작아야 한다.
+     */
+    private val readyFrames = ArrayDeque<Pair<Pose, Float>>()
 
     init {
         loadEngine()
@@ -525,6 +552,13 @@ class WorkoutViewModel @Inject constructor(
             else -> Unit
         }
 
+        // 준비 자세 안내는 재는 중(PREPARING·COLLECTING)에만 갱신한다. 측정이 끝난 뒤에도
+        // 계속 갱신하면 스쿼트 첫 프레임이 "발이 좁아요"로 읽힌다 — 앉기 시작하면 발목
+        // 간격과 무릎 굴곡이 당연히 달라진다.
+        if (_uiState.value.calibrationStage.isMeasuring) {
+            stepReadyPosture(result)
+        }
+
         // rep 깊이는 상태와 저장이 같은 값을 써야 하므로 여기서 한 번만 계산한다.
         // `_uiState.update`는 경합 시 재실행될 수 있어 부작용을 넣으면 안 된다.
         val repDepth = repMaxDepthRatio?.let(config.form::depthLevelByRatio)
@@ -663,6 +697,7 @@ class WorkoutViewModel @Inject constructor(
     fun startCalibration() {
         calibrationFrames.clear()
         calibrationStartMs = null
+        readyFrames.clear()
         prepJob?.cancel()
 
         val prepMs = _uiState.value.calibrationPrepSeconds * 1_000L
@@ -677,6 +712,7 @@ class WorkoutViewModel @Inject constructor(
                 calibrationPrepRemainingMs = prepMs,
                 // 지난 측정의 값이 남아 있으면 아직 화면 밖인데 "자리 좋아요"가 뜬다.
                 calibrationSubjectVisible = false,
+                readyPosture = ReadyPosture.EMPTY,
                 calibrationRemainingMs = CALIBRATION_DURATION_MS,
                 calibrationProblems = emptyList(),
                 // 재측정 중에는 이전 기준선을 지운다. 옛 분모로 계산한 값이 화면에
@@ -703,6 +739,12 @@ class WorkoutViewModel @Inject constructor(
     }
 
     /** 준비가 끝났다. 여기서부터 실제로 프레임을 모은다. */
+    /**
+     * 준비가 끝났다. 여기서부터 실제로 프레임을 모은다.
+     *
+     * `readyFrames`는 비우지 않는다 — 준비 시간에 이미 서 있던 프레임이고, 안내가 잠깐
+     * 사라졌다 돌아오면 사용자는 자기 자세가 바뀐 줄로 읽는다.
+     */
     private fun beginCollecting() {
         calibrationFrames.clear()
         calibrationStartMs = null
@@ -723,9 +765,11 @@ class WorkoutViewModel @Inject constructor(
         prepJob?.cancel()
         calibrationFrames.clear()
         calibrationStartMs = null
+        readyFrames.clear()
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.NONE,
+                readyPosture = ReadyPosture.EMPTY,
                 calibrationRemainingMs = 0,
                 calibrationPrepRemainingMs = 0,
                 calibrationProblems = emptyList(),
@@ -761,6 +805,25 @@ class WorkoutViewModel @Inject constructor(
         finishCalibration()
     }
 
+    /**
+     * 준비 자세 안내를 갱신한다.
+     *
+     * 창을 굴리며 매 프레임 다시 계산한다. 프레임당 비용은 관절 몇 개의 거리 계산이고,
+     * 이미 프레임마다 특징을 전부 계산하고 있으므로 추론 지연에 영향을 주지 않는다.
+     */
+    private fun stepReadyPosture(result: PoseResult) {
+        readyFrames.addLast(result.pose to result.aspectRatio)
+        while (readyFrames.size > READY_WINDOW_FRAMES) readyFrames.removeFirst()
+
+        val posture = ReadyPosture.from(
+            frames = readyFrames.toList(),
+            cameraAngle = _uiState.value.cameraAngle,
+            form = config.form,
+            ready = config.ready,
+        )
+        _uiState.update { it.copy(readyPosture = posture) }
+    }
+
     private fun finishCalibration() {
         val frames = calibrationFrames.toList()
         val calibration = StandingCalibration.from(frames)
@@ -774,12 +837,24 @@ class WorkoutViewModel @Inject constructor(
             return
         }
 
+        // 창 전체로 다시 계산한다. 실시간 안내는 최근 몇 프레임만 보므로, 결과로 남길
+        // 값은 캘리브레이션 창 전체에서 낸 쪽이 안정적이다 — 프레임이 많을수록 중앙값이
+        // 흔들리지 않는다.
+        val readyPosture = ReadyPosture.from(
+            frames = frames,
+            cameraAngle = _uiState.value.cameraAngle,
+            form = config.form,
+            ready = config.ready,
+        )
+
         calibrationFrames.clear()
         calibrationStartMs = null
+        readyFrames.clear()
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.READY,
                 calibration = calibration,
+                readyPosture = readyPosture,
                 activeSide = nearSideOf(frames),
                 calibrationRemainingMs = 0,
                 // 차단하지 않는 문제(발 미검출)는 남겨서 어떤 특징이 빠지는지 알린다.
@@ -791,9 +866,12 @@ class WorkoutViewModel @Inject constructor(
     private fun failCalibration(problems: List<StandingCalibration.Problem>) {
         calibrationFrames.clear()
         calibrationStartMs = null
+        readyFrames.clear()
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.NONE,
+                // 실패 사유와 준비 자세 안내가 함께 뜨면 무엇을 고쳐야 할지 흐려진다.
+                readyPosture = ReadyPosture.EMPTY,
                 calibrationProblems = problems,
                 calibrationRemainingMs = 0,
             )
@@ -941,6 +1019,7 @@ class WorkoutViewModel @Inject constructor(
         resetRepTracking()
         calibrationFrames.clear()
         calibrationStartMs = null
+        readyFrames.clear()
         _uiState.update {
             it.copy(
                 cameraAngle = angle,
@@ -948,6 +1027,9 @@ class WorkoutViewModel @Inject constructor(
                 repState = RepState.IDLE,
                 calibrationStage = CalibrationStage.NONE,
                 calibration = null,
+                // 준비 자세 항목의 절반이 정면 전용이다. 각도가 바뀌면 판정 가능 항목도
+                // 바뀌므로 이전 결과를 남겨두면 안 된다.
+                readyPosture = ReadyPosture.EMPTY,
                 activeSide = null,
                 features = null,
                 calibrationProblems = emptyList(),
@@ -998,6 +1080,15 @@ class WorkoutViewModel @Inject constructor(
          * 가만히 서 있기를 요구하는 시간으로도 짧다.
          */
         const val CALIBRATION_DURATION_MS = 3_000L
+
+        /**
+         * 준비 자세 안내에 쓰는 창 크기(프레임).
+         *
+         * 30fps에서 약 0.5초다. 중앙값을 낼 만큼 크고(실측 P009처럼 몇 프레임이 무너져도
+         * 흡수한다), 사용자가 발을 옮겼을 때 반영이 늦다고 느끼지 않을 만큼 작아야 한다.
+         * 캘리브레이션 창(3초)을 그대로 쓰면 이미 고친 자세를 계속 지적한다.
+         */
+        const val READY_WINDOW_FRAMES = 15
 
 
         /** 표시용 스무딩 계수. 값이 클수록 최근 프레임에 민감해진다. */

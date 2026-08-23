@@ -42,6 +42,7 @@ import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.PoseVisibility
+import com.mist.formchecker.poseengine.ReadyPosture
 import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepState
@@ -311,6 +312,9 @@ internal fun CalibrationBar(
                     style = MaterialTheme.typography.labelSmall,
                     color = if (state.calibrationSubjectVisible) LimeGreen else FeedbackWarning,
                 )
+                // 카운트다운이 도는 동안 준비 자세를 고칠 수 있어야 한다. 측정이 끝난 뒤에
+                // 알려주면 사용자는 이미 스쿼트를 시작한 뒤다.
+                ReadyPostureRows(state.readyPosture)
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -330,6 +334,7 @@ internal fun CalibrationBar(
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted,
                 )
+                ReadyPostureRows(state.readyPosture)
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -353,6 +358,9 @@ internal fun CalibrationBar(
                 )
                 // 차단하지 않는 문제. 어떤 특징이 빠지는지 알려야 한다.
                 state.calibrationProblems.forEach { CalibrationProblemRow(it) }
+                // 측정이 끝난 뒤에도 남긴다 — 준비 자세가 어긋난 채로 잰 기준선이라는
+                // 사실은 이 세션 내내 유효한 정보다.
+                ReadyPostureRows(state.readyPosture)
                 OutlinedButton(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -428,6 +436,47 @@ internal fun PrepSecondsPicker(selected: Int, onSelect: (Int) -> Unit) {
                 )
             }
         }
+    }
+}
+
+/**
+ * 준비 자세 점검 줄.
+ *
+ * ## 왜 문제와 "못 본 항목"을 함께 보여주는가
+ * 문제가 없다고 "준비 자세 좋아요"만 쓰면, 측면 촬영에서 세 항목(발 간격·발끝 방향·좌우
+ * 균형)을 아예 재지 않았는데도 다 통과한 것처럼 읽힌다. 재지도 않은 것을 괜찮다고 말하지
+ * 않는다 — `SessionReport.notJudged`와 같은 규칙이다.
+ *
+ * ## 왜 판정을 여기서 하지 않는가
+ * 두 운동 화면이 이 컴포저블을 공유한다. 화면에 조건을 넣으면 사용자용과 개발용이 다른
+ * 답을 내게 된다([ReadyPosture]가 판정을 독점한다).
+ */
+@Composable
+internal fun ReadyPostureRows(posture: ReadyPosture) {
+    if (posture.framesUsed == 0) return
+
+    posture.issues.forEach { issue ->
+        Text(
+            text = FeedbackLabels.issue(issue),
+            style = MaterialTheme.typography.labelSmall,
+            color = FeedbackWarning,
+        )
+    }
+    if (posture.clean) {
+        Text(
+            // "좋아요"가 아니라 무엇이 확인됐는지를 쓴다 — 확정된 임계값 전부가 "오류를
+            // 잡는가" 미검증이므로, 통과를 자세가 좋다는 뜻으로 말할 수 없다.
+            text = "준비 자세에서 볼 수 있는 건 다 괜찮아요.",
+            style = MaterialTheme.typography.labelSmall,
+            color = LimeGreen,
+        )
+    }
+    posture.notJudged.forEach { (check, reason) ->
+        Text(
+            text = FeedbackLabels.notJudged(check, reason),
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+        )
     }
 }
 

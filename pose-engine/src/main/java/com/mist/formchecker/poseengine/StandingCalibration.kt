@@ -255,8 +255,14 @@ data class StandingCalibration(
         /** 길이 지표 표준편차 상한. 넘으면 사람이 움직였거나 추정이 불안정하다. */
         private const val MAX_JITTER = 0.01f
 
-        /** 기립 무릎 굴곡 상한. 넘으면 곧게 선 자세가 아니다. */
-        private const val MAX_STANDING_FLEXION = 20f
+        /**
+         * 기립 무릎 굴곡 상한. 넘으면 곧게 선 자세가 아니다.
+         *
+         * [ReadyThresholds.maxStandingKneeFlexion]이 이 값을 참조한다 — 준비 자세 안내는
+         * 측정이 끝나기 **전에** 같은 조건을 알려주는 것이므로, 두 곳에 다른 숫자가
+         * 있으면 "안내는 안 뜨는데 측정은 실패"가 된다.
+         */
+        const val MAX_STANDING_FLEXION = 20f
     }
 
     /**

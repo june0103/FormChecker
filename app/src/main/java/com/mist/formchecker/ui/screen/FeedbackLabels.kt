@@ -3,6 +3,9 @@ package com.mist.formchecker.ui.screen
 import com.mist.formchecker.poseengine.CameraAngle
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.ReadyCheck
+import com.mist.formchecker.poseengine.ReadyIssue
+import com.mist.formchecker.poseengine.ReadyPosture
 
 /**
  * 사용자에게 보이는 말.
@@ -73,4 +76,56 @@ object FeedbackLabels {
 
     fun depth(raw: String): String =
         runCatching { depth(DepthLevel.valueOf(raw)) }.getOrDefault(raw)
+
+    // ── 준비 자세 ───────────────────────────────────────────
+
+    /**
+     * 준비 자세를 고치는 말.
+     *
+     * ## 무엇을 하라고만 쓴다
+     * "발 간격이 어깨너비의 0.74배입니다"는 사용자가 확인할 수 없는 값이다. 숫자는
+     * `ReadyThresholds`의 KDoc과 개발용 화면에 남기고, 여기에는 몸으로 할 수 있는
+     * 동작만 쓴다.
+     *
+     * ## "발끝을 바깥으로"에 각도를 붙이지 않는다
+     * 올바른 자세 안내는 10~30도를 말하지만 **정면 촬영으로는 각도를 낼 수 없다** —
+     * `뒤꿈치→발끝` 벡터가 깊이축에 놓여 크게 단축된다([ReadyPosture.leftToeDirection]).
+     * 판정이 부호뿐이므로 문구도 방향만 말한다.
+     */
+    fun issue(issue: ReadyIssue): String = when (issue) {
+        ReadyIssue.TURN_TO_FRONT -> "카메라를 정면으로 마주 보고 서 주세요"
+        ReadyIssue.TURN_TO_SIDE -> "카메라가 옆에서 보도록 몸을 돌려 주세요"
+        ReadyIssue.FACE_SQUARELY -> "몸이 비스듬해요. 카메라를 똑바로 마주 보거나 옆으로 서 주세요"
+        ReadyIssue.KNEES_BENT -> "무릎을 곧게 펴고 서 주세요"
+        ReadyIssue.STANCE_TOO_NARROW -> "발을 어깨너비만큼 벌려 주세요"
+        ReadyIssue.STANCE_TOO_WIDE -> "발을 어깨너비까지 모아 주세요"
+        ReadyIssue.TOES_INWARD -> "발끝을 살짝 바깥으로 돌려 주세요"
+        ReadyIssue.WEIGHT_ON_ONE_SIDE -> "체중을 양발에 고르게 실어 주세요"
+    }
+
+    /** 준비 자세 항목 이름. "무엇을 봤는가 / 못 봤는가"를 말할 때 쓴다. */
+    fun topic(check: ReadyCheck): String = when (check) {
+        ReadyCheck.FACING -> "서 있는 방향"
+        ReadyCheck.KNEE_STRAIGHT -> "무릎 펴기"
+        ReadyCheck.STANCE_WIDTH -> "발 간격"
+        ReadyCheck.TOE_DIRECTION -> "발끝 방향"
+        ReadyCheck.WEIGHT_BALANCE -> "좌우 균형"
+    }
+
+    /**
+     * 준비 자세 항목을 못 본 이유.
+     *
+     * 각도 때문에 못 본 것과 관절이 안 보여 못 본 것은 **사용자가 할 일이 다르다** —
+     * 앞은 다음 세션에서 각도를 바꿔야 하고, 뒤는 지금 자리를 고치면 된다.
+     *
+     * 항목 이름 뒤에 조사를 붙이지 않고 줄표로 잇는다 — 조사는 앞 글자의 종성에 따라
+     * 달라지므로, 문구에 박아두면 항목을 추가할 때마다 "무릎 펴기은" 같은 말이 나온다.
+     */
+    fun notJudged(check: ReadyCheck, reason: ReadyPosture.NotJudgedReason): String =
+        when (reason) {
+            ReadyPosture.NotJudgedReason.CAMERA_ANGLE ->
+                "${topic(check)} — 정면으로 서야 볼 수 있어요"
+            ReadyPosture.NotJudgedReason.KEYPOINTS ->
+                "${topic(check)} — 못 봤어요, 몸 전체가 잘 보이게 서 주세요"
+        }
 }

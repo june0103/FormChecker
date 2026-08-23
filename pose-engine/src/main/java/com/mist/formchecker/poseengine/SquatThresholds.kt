@@ -475,6 +475,106 @@ data class AngleDetectionThresholds(
 )
 
 /**
+ * 준비 자세(선 자세) 점검 임계값.
+ *
+ * ## [FormThresholds]와 분리한 이유
+ * 재는 순간이 다르다. [FormThresholds]는 **동작 중**의 프레임을 보고, 여기 있는 값은
+ * 기준 자세 측정 창의 **정적인 선 자세**를 본다. 같은 신호라도 분포가 다르다 — 예를 들어
+ * 좌우 쏠림은 최저점에서 자연히 커지므로, 동작용 허용폭을 선 자세에 그대로 쓰면 느슨하다.
+ *
+ * 다만 **분포가 다르다고 확인되기 전에는 값을 복제하지 않는다.** 좌우 쏠림이 그 경우로,
+ * [FormThresholds.hipShiftLimit]를 그대로 쓴다([ReadyPosture] 참고) — 두 곳에 같은 숫자를
+ * 적어두면 한쪽만 갱신되는 실수가 반드시 생긴다.
+ *
+ * ## 여기 있는 판정은 운동을 막지 않는다
+ * 준비 자세가 어긋나도 기준선(다리 길이·발 길이)은 유효하게 측정된다. 그래서 이 항목들은
+ * 캘리브레이션 실패 사유가 아니라 **안내**다. 막으면 얻는 것 없이 운동 흐름만 끊긴다
+ * (`CalibrationStage` 주석과 같은 이유).
+ */
+data class ReadyThresholds(
+    /**
+     * 발목 간격 ÷ 어깨 너비. 이 값 미만이면 발이 어깨보다 좁다.
+     *
+     * ## 기준점 1.0은 정의다
+     * "발을 어깨너비 정도로 벌린다"가 스쿼트 준비 자세의 규칙이고, 그건 `발목 간격 =
+     * 어깨 너비`라는 뜻이다. 측정으로 정할 값이 아니다.
+     *
+     * ## 왜 골반 너비가 아니라 어깨 너비로 나누는가
+     * 규칙이 어깨너비를 말하므로 분모도 어깨여야 기준점이 1.0이 된다. 골반으로 나누면
+     * 기준점이 사람마다 달라진다(실측 12세션의 `골반/어깨` = 0.536~0.621).
+     *
+     * 정규화 품질은 둘이 같다 — 그 비율의 폭이 0.09에 불과해, 어깨로 나눈 값은 골반으로
+     * 나눈 값의 거의 상수배다. **둘 다 정면 전용이다**: 측면에서는 두 발목이 겹쳐 간격이
+     * 무너지고 두 어깨도 앞뒤로 겹친다.
+     *
+     * ## ⚠ 허용폭에는 근거가 약하다 ([ThresholdOrigin.PROVISIONAL])
+     * 실측 정면 12세션(11명) READY 3,413프레임의 세션별 중앙값:
+     *
+     * ```
+     * 0.74  0.88  0.93  1.06  1.07  1.11  1.12  1.22  1.24  1.27  1.31  1.77
+     * ```
+     *
+     * 12개 중 9개가 0.88~1.31에 모이고, 양 끝 0.74·1.77이 뚜렷한 간극(0.74↔0.88,
+     * 1.31↔1.77) 뒤에 떨어져 있다. 경계는 그 간극 안쪽에 두었고, 이 값이면 12세션 중
+     * **2개(0.74·1.77)가 걸린다.**
+     *
+     * **이 데이터는 "지시 없이 편하게 선" 상태다.** 그래서 걸린 두 세션이 실제로 틀린
+     * 자세였다는 증거는 없고, 반대로 나머지가 모두 맞았다는 증거도 없다. 이 항목을
+     * 경고가 아니라 안내로 두는 이유다.
+     *
+     * 사람 내 폭은 매우 좁다(p5~p95 중앙 0.03~0.08) — **측정은 충분히 정밀하고, 위 폭은
+     * 측정 오차가 아니라 사람들이 실제로 다르게 섰다는 뜻이다.**
+     */
+    val stanceNarrowLimit: Float = 0.85f,
+
+    /** 발목 간격 ÷ 어깨 너비. 이 값 초과면 발이 어깨보다 넓다. 근거는 [stanceNarrowLimit]. */
+    val stanceWideLimit: Float = 1.35f,
+
+    /**
+     * 선 자세 무릎 굴곡 상한(도). 넘으면 무릎을 덜 편 것이다.
+     *
+     * [StandingCalibration.MAX_STANDING_FLEXION]을 그대로 쓴다 — 캘리브레이션이 이미 같은
+     * 조건으로 차단하고 있고, 두 곳에 다른 숫자를 두면 "안내는 안 뜨는데 측정은 실패"가
+     * 된다. 여기서 따로 보는 이유는 **측정이 끝나기 전에** 알려주기 위함이다.
+     *
+     * 실측 12세션 READY 중앙값이 0.9~10.5°였다(한 세션만 10.5°, 나머지는 6.2° 이하).
+     */
+    val maxStandingKneeFlexion: Float = StandingCalibration.MAX_STANDING_FLEXION,
+
+    /**
+     * 발 길이 ÷ 다리 길이. 이 값 미만이면 발끝 방향을 판정하지 않는다.
+     *
+     * ## 왜 게이트가 필요한가
+     * 발끝 방향은 `뒤꿈치→발끝` 벡터의 좌우 성분으로 본다. 정면에서 이 벡터는 대부분
+     * 깊이축에 놓여 크게 단축되는데, **얼마나 단축됐는지가 카메라 높이에 따라 달라진다.**
+     * 너무 단축되면 좌우 성분이 키포인트 노이즈와 구분되지 않는다.
+     *
+     * ## 실측에서 두 무리가 깨끗하게 갈렸다 ([ThresholdOrigin.DATA_DERIVED])
+     * 정면 12세션의 `발 길이/다리 길이`:
+     *
+     * | 무리 | 값 |
+     * |---|---|
+     * | 정상 10세션 | 0.119 ~ 0.221 |
+     * | 무너진 2세션 | **0.061 · 0.076** |
+     *
+     * 그 두 세션이 발끝 방향 부호가 뒤집힌 프레임을 낸 유일한 세션이다(한 세션의 6.1%).
+     * 경계는 두 무리 사이(0.076↔0.119)에 두었다.
+     */
+    val minFootLengthRatio: Float = 0.10f,
+) {
+    companion object {
+        val ORIGINS: Map<String, ThresholdOrigin> = mapOf(
+            // 기준점 1.0은 정의, 허용폭은 지시 없이 선 12세션의 간극에서 골랐다.
+            "stanceNarrowLimit" to ThresholdOrigin.PROVISIONAL,
+            "stanceWideLimit" to ThresholdOrigin.PROVISIONAL,
+            // StandingCalibration이 이미 쓰고 있던 값을 그대로 참조한다.
+            "maxStandingKneeFlexion" to ThresholdOrigin.PROVISIONAL,
+            "minFootLengthRatio" to ThresholdOrigin.DATA_DERIVED,
+        )
+    }
+}
+
+/**
  * rep 카운팅 임계값. **[FormThresholds]와 서로 참조하지 않는다.**
  *
  * ## 왜 자세 임계값과 분리하는가
@@ -592,6 +692,7 @@ data class SmoothingConfig(
  */
 data class SquatAnalyzerConfig(
     val form: FormThresholds = FormThresholds(),
+    val ready: ReadyThresholds = ReadyThresholds(),
     val angleDetection: AngleDetectionThresholds = AngleDetectionThresholds(),
     val smoothing: SmoothingConfig = SmoothingConfig(),
     val minConfidence: Float = Pose.MIN_CONFIDENCE,
