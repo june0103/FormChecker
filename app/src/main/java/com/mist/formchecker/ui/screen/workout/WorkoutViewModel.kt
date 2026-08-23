@@ -184,6 +184,20 @@ data class WorkoutUiState(
     val isFrontCamera: Boolean get() = lensFacing == CameraSelector.LENS_FACING_FRONT
 
     /**
+     * 지금 횟수를 세고 있나. 기준 자세를 다 잰 뒤에만 센다.
+     *
+     * ## 왜 막는가
+     * 카메라 앞으로 걸어가고 자리를 잡는 동안 무릎 각도가 오르내려 **하지 않은 rep이
+     * 세어진다.** 유령 rep은 그 세션 기록을 그대로 오염시키고, 나중에 어느 rep이 진짜였는지
+     * 알 방법이 없다.
+     *
+     * ## 왜 이걸 화면에 노출하는가
+     * 막는 것만으로는 더 나쁘다 — 스쿼트를 하는데 숫자가 0에 머물면 사용자는 앱이 고장난
+     * 줄로 읽는다. 두 운동 화면이 이 값을 보고 "왜 안 세는지"를 말한다.
+     */
+    val countingEnabled: Boolean get() = calibrationStage == CalibrationStage.READY
+
+    /**
      * 정규화된 자세 특징을 쓸 수 있는가.
      *
      * 카운팅과는 무관하다 — 무릎 각도만 쓰는 rep 카운팅은 기준선 없이도 동작한다
@@ -204,13 +218,18 @@ data class WorkoutUiState(
 /**
  * 기준 자세 측정 단계.
  *
- * ## 왜 수집 화면처럼 강제하지 않는가
- * 수집 화면은 캘리브레이션이 실패하면 진행을 막는다 — 기준선이 잘못되면 그 세션 전체가
- * 쓸 수 없기 때문이다. 운동 화면은 **제품**이고, rep 카운팅은 무릎 각도만 쓰므로 기준선이
- * 없어도 동작한다. 카운팅을 막으면 얻는 것 없이 운동 흐름만 끊긴다.
+ * ## 카운팅이 [READY]에서만 돌아간다
+ * 이전에는 기준선이 **선택**이었다 — "rep 카운팅은 무릎 각도만 쓰므로 기준선 없이도
+ * 동작하고, 막으면 얻는 것 없이 운동 흐름만 끊긴다"는 판단이었다. 실기에서 뒤집혔다:
+ * 사용자가 카메라 앞으로 걸어가고 자리를 잡는 동안 무릎 각도가 오르내려 **하지 않은 rep이
+ * 세어졌다.** 유령 rep은 세션 기록을 그대로 오염시키고 나중에 걸러낼 방법이 없다.
  *
- * 그래서 기준선은 **선택**이고, 없으면 정규화된 판정만 못 한다는 사실을 화면에 알린다.
- * 문서 §2.3이 카운팅과 자세 평가를 분리한 것과 같은 이유다.
+ * 문서 §2.3의 "카운팅과 자세 평가 분리"는 유효하다 — 분리한 것은 **판정 기준**이고, 여기서
+ * 묶은 것은 **언제부터 시작하는가**다. 기준선 없이 카운팅이 기술적으로 가능한 것과, 그때
+ * 세는 것이 옳은 것은 다른 문제였다.
+ *
+ * 막는 것만으로는 더 나쁘다. 왜 안 세는지 반드시 화면에 알린다
+ * ([WorkoutUiState.countingEnabled]).
  */
 /**
  * 기준 자세 측정 전에 줄 준비 시간.
@@ -515,7 +534,24 @@ class WorkoutViewModel @Inject constructor(
             nowMs = result.timestampMs,
         )
 
-        val event = stateMachine.update(buildRepFrame(result, form))
+        // 스무딩은 항상 먹인다 — 카운팅이 켜지는 순간 EMA·중앙값 창이 차 있어야 첫 rep이
+        // 지연 없이 잡힌다. 상태머신에 넣을지만 게이트한다.
+        val repFrame = buildRepFrame(result, form)
+
+        // **기준 자세를 다 잰 뒤에만 센다.**
+        //
+        // 이전에는 카운팅이 캘리브레이션과 독립이었다 — "기준선 없이도 무릎 각도만으로
+        // 셀 수 있고, 막으면 얻는 것 없이 운동만 끊긴다"는 판단이었다. 실기에서 그게
+        // 뒤집혔다: 사용자가 카메라 앞으로 걸어가고 자리를 잡는 동안 무릎 각도가 오르내려
+        // **하지 않은 rep이 세어진다.** 유령 rep은 세션 기록을 그대로 오염시킨다.
+        //
+        // 대신 왜 안 세어지는지 반드시 화면에 알린다([WorkoutUiState.countingEnabled]) —
+        // 아무 말 없이 0에 머무는 것이 유령 rep보다 나쁘다.
+        val event = if (_uiState.value.countingEnabled) {
+            stateMachine.update(repFrame)
+        } else {
+            null
+        }
 
         // rep이 시작될 때 비우고 그 뒤로 최댓값을 쌓는다. 시작 프레임부터 모아야 하므로
         // 이벤트를 받은 직후에 처리한다.
@@ -726,6 +762,9 @@ class WorkoutViewModel @Inject constructor(
         calibrationStartMs = null
         readyFrames.clear()
         prepJob?.cancel()
+        // 재측정을 시작하면 카운팅이 멈춘다. 진행 중이던 rep은 버린다 — 측정이 끝난 뒤
+        // 이어 세면 걸어간 구간이 그 rep에 섞인다. rep 수는 유지된다.
+        resetRepTracking()
 
         val prepMs = _uiState.value.calibrationPrepSeconds * 1_000L
         if (prepMs <= 0) {
@@ -877,6 +916,13 @@ class WorkoutViewModel @Inject constructor(
         calibrationFrames.clear()
         calibrationStartMs = null
         readyFrames.clear()
+        // 여기서부터 센다. 측정 창의 상태가 상태머신에 남아 있으면 첫 프레임이 하강 중으로
+        // 읽힐 수 있어 IDLE에서 시작한다.
+        //
+        // **스무딩은 초기화하지 않는다** — 측정 창 3초 동안 EMA와 중앙값 창이 선 자세로
+        // 채워져 있고, 그게 상태머신이 STANDING으로 들어가는 데 필요한 값이다. 여기서
+        // 비우면 첫 rep이 창 크기만큼(약 0.25초) 늦게 잡힌다.
+        startCounting()
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.READY,
@@ -992,6 +1038,21 @@ class WorkoutViewModel @Inject constructor(
             kneeMedian = MedianWindow(desired)
         }
         return fps
+    }
+
+    /**
+     * 카운팅을 처음부터 시작한다. 스무딩은 유지한다.
+     *
+     * [resetRepTracking]과 나눈 이유: 저쪽은 시계열이 **끊겼을 때**(카메라·모델 전환) 쓰는
+     * 것이라 스무딩까지 버려야 하지만, 기준 자세 측정 직후는 시계열이 이어져 있다.
+     */
+    private fun startCounting() {
+        stateMachine.reset()
+        repMaxDepthRatio = null
+        repMaxShinDepth = null
+        repWarnings.clear()
+        repWorstKnee = null
+        repWarningPhases.clear()
     }
 
     /** 카메라·모델 전환처럼 시계열이 끊기는 경우 스무딩과 상태머신을 초기화한다. */

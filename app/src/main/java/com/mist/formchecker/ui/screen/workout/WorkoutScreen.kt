@@ -296,6 +296,16 @@ private fun HudTopBand(
             )
         }
 
+        if (!state.countingEnabled) {
+            Text(
+                // 개발 화면에서도 같은 게이트가 걸린다. 상태머신이 IDLE에 머무는 이유를
+                // 못 보면 카운팅 버그로 오인한다.
+                text = "카운팅 중지 — 기준 자세 미측정",
+                style = MaterialTheme.typography.titleMedium,
+                color = FeedbackWarning,
+            )
+        }
+
         Text(
             text = buildString {
                 append(state.repState.label())

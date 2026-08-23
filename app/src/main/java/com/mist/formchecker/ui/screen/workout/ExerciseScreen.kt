@@ -32,6 +32,7 @@ import com.mist.formchecker.poseengine.PoseVisibility
 import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
+import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.LimeGreen
 import com.mist.formchecker.ui.theme.Radius
 import com.mist.formchecker.ui.theme.RepCounterDisplay
@@ -248,6 +249,17 @@ private fun ExerciseHud(
                     style = RepCounterLabel,
                     color = TextPrimary,
                     modifier = Modifier.padding(start = Spacing.xs, bottom = Spacing.sm),
+                )
+            }
+
+            // 세지 않는 이유를 **숫자 바로 아래**에 붙인다. 사용자가 보는 곳은 여기고,
+            // 아래 기준 자세 줄까지 시선이 내려가지 않는다. 아무 말 없이 0에 머물면
+            // 앱이 고장난 줄로 읽는다.
+            if (!state.countingEnabled) {
+                Text(
+                    text = "아직 세지 않아요 — 기준 자세를 먼저 재주세요",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = FeedbackWarning,
                 )
             }
 
