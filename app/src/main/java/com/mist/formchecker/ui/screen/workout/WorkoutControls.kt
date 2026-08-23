@@ -1,5 +1,6 @@
 package com.mist.formchecker.ui.screen.workout
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -30,8 +32,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -203,19 +214,23 @@ internal fun AngleOption(
 }
 
 /**
- * 고른 각도와 실제로 서 있는 방향이 다를 때의 안내.
+ * 지금 판정 중인 방향과 실제로 서 있는 방향이 다를 때의 안내.
  *
- * 자동으로 전환하지 않는 이유: 오탐이 나면 판정 항목이 멋대로 바뀌어 더 혼란스럽다.
- * 다만 안내조차 없으면 측면 모드로 정면에 서 있어도 앱이 아무 말 없이 틀린 깊이를
- * 계산하게 되는데, 크래시가 없어 발견되지 않는다.
+ * ## 자동으로 전환하지 않는다
+ * 방향은 기준 자세 창의 다수결로 확정된다. 그 뒤에 프레임 하나를 보고 갈아타면 안 된다 —
+ * 실측에서 프레임 단위 추정은 0.5%가 반대로 읽힌다. **그리고 기준선 자체가 그 방향에서
+ * 잰 값이라**(활성측·분모·원근 조건이 다르다) 방향만 바꾸면 기준선과 어긋난다.
+ *
+ * @param onSwitch 눌러서 바로 전환할 수 있으면 넘긴다. null이면 안내만 한다 —
+ *   사용자용 화면이 그렇다. 거기서 방향을 바꾸는 길은 기준 자세를 다시 재는 것뿐이다.
  */
 @Composable
 internal fun AngleMismatchNotice(
     suggested: CameraAngle,
-    onSwitch: () -> Unit,
+    onSwitch: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val name = if (suggested == CameraAngle.FRONT) "정면" else "측면"
+    val name = FeedbackLabels.angle(suggested)
 
     Row(
         modifier = modifier
@@ -230,17 +245,24 @@ internal fun AngleMismatchNotice(
         Text("ⓘ", color = FeedbackInfo, style = MaterialTheme.typography.titleLarge)
         Text(
             // 각도가 어긋나면 판정 항목이 통째로 바뀐다. 떨어져 선 자리에서 알아야 한다.
-            text = "$name 으로 서 계신 것 같습니다",
+            text = if (onSwitch != null) {
+                "$name 으로 서 계신 것 같습니다"
+            } else {
+                // 사용자용 화면에는 전환 버튼이 없다. 무엇을 해야 하는지 말한다.
+                "$name 으로 서 계신 것 같아요. 기준 자세를 다시 재주세요"
+            },
             style = MaterialTheme.typography.titleMedium,
             color = FeedbackInfo,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            text = "전환",
-            style = MaterialTheme.typography.labelLarge,
-            color = FeedbackInfo,
-            modifier = Modifier.clickable(onClick = onSwitch).padding(Spacing.xs),
-        )
+        if (onSwitch != null) {
+            Text(
+                text = "전환",
+                style = MaterialTheme.typography.labelLarge,
+                color = FeedbackInfo,
+                modifier = Modifier.clickable(onClick = onSwitch).padding(Spacing.xs),
+            )
+        }
     }
 }
 
@@ -350,11 +372,18 @@ internal fun CalibrationBar(
 
             CalibrationStage.COLLECTING -> {
                 val seconds = (state.calibrationRemainingMs + 999) / 1000
+                // 준비 자세가 어긋나 있으면 **3초가 돌지 않는다.** 그때 "그대로 계세요"를
+                // 띄우면 사용자는 그대로 서서 아무 일도 일어나지 않는 것을 본다.
+                val waiting = !state.readyPosture.readyToMeasure
                 InfoNote(notes) {
                     Text(
-                        text = "그대로 계세요 — ${seconds}초",
+                        text = if (waiting) {
+                            "자세를 맞추면 3초를 셀게요"
+                        } else {
+                            "그대로 계세요 — ${seconds}초"
+                        },
                         style = MaterialTheme.typography.titleLarge,
-                        color = LimeGreen,
+                        color = if (waiting) FeedbackWarning else LimeGreen,
                     )
                 }
                 if (!collapseDetails) {
@@ -375,7 +404,9 @@ internal fun CalibrationBar(
                 InfoNote(notes) {
                     Text(
                         text = if (collapseDetails) {
-                            "기준 자세를 다 쟀어요"
+                            // 방향을 사용자가 고르지 않으므로, **무엇으로 판정 중인지**를
+                            // 말해줘야 한다. 안 그러면 왜 이 문구가 나오는지 알 수 없다.
+                            "기준 자세를 다 쟀어요 · ${FeedbackLabels.angle(state.cameraAngle)}"
                         } else {
                             listOfNotNull("기준선 확보", baselineNote(state))
                                 .joinToString(" · ")
@@ -485,6 +516,133 @@ private const val RESTART_NOTE = "몸이 가려지면 처음부터 다시 세요
 private const val WHY_CALIBRATE =
     "카메라 앞으로 걸어오는 동안 하지 않은 횟수가 세어져서, 기준 자세를 잡은 뒤부터 " +
         "세기로 했어요. 키와 다리 길이를 알면 앉은 깊이도 더 정확해져요. 3초면 됩니다."
+
+/**
+ * 카메라 위에 얹는 아이콘 버튼. 아이콘 아래 짧은 이름이 붙는다.
+ *
+ * ## 왜 아이콘을 직접 그리는가
+ * `material-icons-core`에도 카메라 전환 아이콘이 없고, 있는 쪽(`material-icons-extended`)은
+ * 아이콘 전체를 끌고 온다. 필요한 것이 두 개뿐이라 [Canvas]로 그린다 — 폰트를 로컬에
+ * 번들한 것과 같은 이유다(오프라인 우선, 의존성 최소).
+ *
+ * 직접 그리니 **선 두께를 우리가 정한다.** 카메라 영상 위에 얹히므로 배경 밝기를 통제할 수
+ * 없고, 얇은 선은 밝은 배경에서 사라진다.
+ *
+ * ## 왜 이름을 붙이는가
+ * 원형 화살표는 "전환"으로도 "초기화"로도 읽힌다 — 이 화면에는 실제로 "초기화"(횟수 리셋)가
+ * 따로 있어서 헷갈릴 여지가 있다. 일반 카메라 앱은 아이콘만 두지만, 여기서는 두 글자를
+ * 붙여 그 모호함을 없앤다.
+ *
+ * @param label 아이콘 아래에 붙는 이름. 접근성 설명으로도 쓴다.
+ */
+@Composable
+internal fun HudAction(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    glyph: DrawScope.(Color) -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(Radius.md))
+            // 접근성 최소 터치 타겟 (디자인시스템 68행). `clickable`보다 먼저 둬야
+            // 늘어난 높이가 과녁에 포함된다.
+            .heightIn(min = TouchTarget.minSize)
+            .clickable(onClickLabel = label, onClick = onClick)
+            // 아이콘이 그림이라 이름을 따로 붙인다 — 아래 라벨 텍스트는 시각 정보이고,
+            // 스크린 리더에는 이 값이 나간다.
+            //
+            // 접근성 트리에서는 클릭 노드와 이름 노드가 따로 잡힌다(기기에서 확인).
+            // 이 앱의 다른 버튼도 모두 같은 모양이라 Compose가 병합 노드를 그렇게
+            // 내보내는 것으로 보고 그대로 뒀다.
+            .semantics(mergeDescendants = true) { contentDescription = label }
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Canvas(modifier = Modifier.size(HudIconSize)) { glyph(TextPrimary) }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextPrimary,
+        )
+    }
+}
+
+/** HUD 아이콘 한 변. 터치 타겟(48dp)보다 작다 — 여백이 과녁을 채운다. */
+private val HudIconSize = 26.dp
+
+/** 선 두께 비율. 카메라 영상 위에서 사라지지 않을 만큼 굵게 둔다. */
+private const val GLYPH_STROKE = 0.12f
+
+/** 왼쪽을 가리키는 꺾쇠. 뒤로가기. */
+internal fun DrawScope.drawBackGlyph(color: Color) {
+    val w = size.width
+    val h = size.height
+    val path = Path().apply {
+        moveTo(w * 0.62f, h * 0.16f)
+        lineTo(w * 0.34f, h * 0.50f)
+        lineTo(w * 0.62f, h * 0.84f)
+    }
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(
+            width = w * GLYPH_STROKE,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        ),
+    )
+}
+
+/**
+ * 한 바퀴 돌아오는 화살표 + 가운데 렌즈. 카메라 전환.
+ *
+ * 호를 한 바퀴 다 그리지 않고 틈을 남긴다 — 닫힌 원은 회전으로 읽히지 않는다.
+ */
+internal fun DrawScope.drawCameraFlipGlyph(color: Color) {
+    val stroke = size.width * GLYPH_STROKE
+    // 화살촉이 잘리지 않도록 호를 안쪽으로 들여 그린다.
+    val inset = stroke / 2f + size.width * 0.14f
+    val diameter = size.width - inset * 2f
+    val radius = diameter / 2f
+
+    val startAngle = 125f
+    val sweep = 260f
+    drawArc(
+        color = color,
+        startAngle = startAngle,
+        sweepAngle = sweep,
+        useCenter = false,
+        topLeft = Offset(inset, inset),
+        size = Size(diameter, diameter),
+        style = Stroke(width = stroke, cap = StrokeCap.Round),
+    )
+
+    // 호가 끝나는 지점의 접선 방향으로 화살촉을 얹는다. Compose 각도는 3시가 0도,
+    // 시계 방향이 양수이고 y는 아래로 증가한다.
+    val endRad = Math.toRadians((startAngle + sweep).toDouble())
+    val tip = Offset(
+        x = center.x + (radius * kotlin.math.cos(endRad)).toFloat(),
+        y = center.y + (radius * kotlin.math.sin(endRad)).toFloat(),
+    )
+    // 접선 (−sinθ, cosθ)과 그에 수직인 방향으로 삼각형을 만든다.
+    val along = Offset(-kotlin.math.sin(endRad).toFloat(), kotlin.math.cos(endRad).toFloat())
+    val across = Offset(kotlin.math.cos(endRad).toFloat(), kotlin.math.sin(endRad).toFloat())
+    val head = size.width * 0.20f
+    val head2 = head / 2f
+    drawPath(
+        path = Path().apply {
+            moveTo(tip.x + along.x * head2, tip.y + along.y * head2)
+            lineTo(tip.x - along.x * head2 + across.x * head, tip.y - along.y * head2 + across.y * head)
+            lineTo(tip.x - along.x * head2 - across.x * head, tip.y - along.y * head2 - across.y * head)
+            close()
+        },
+        color = color,
+    )
+
+    drawCircle(color = color, radius = size.minDimension * 0.13f, center = center)
+}
 
 /**
  * 제목 줄 오른쪽에 안내 아이콘을 붙이고, 누르면 접어둔 문구를 펼친다.

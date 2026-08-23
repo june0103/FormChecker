@@ -305,6 +305,77 @@ class ReadyPostureTest {
         assertTrue(result.issues.none { it.check == ReadyCheck.STANCE_WIDTH })
     }
 
+    // ── 측정 시작 게이트 ─────────────────────────────────────
+
+    /**
+     * 기다렸다 실패하는 것이 가장 나쁜 순서다. 조건이 어긋나면 3초 창을 시작하지 않는다.
+     */
+    @Test
+    fun `비스듬히 서 있으면 측정을 시작하지 않는다`() {
+        val result = ReadyPosture.from(frames(sidePose()), CameraAngle.FRONT)
+        assertFalse(result.readyToMeasure)
+        assertTrue(ReadyIssue.TURN_TO_FRONT in result.blockingIssues)
+    }
+
+    @Test
+    fun `무릎을 덜 펴면 측정을 시작하지 않는다`() {
+        val result = evaluate(frontPose(ankleHalfWidth = 0.18f, kneeOffset = 0.12f))
+        assertFalse(result.readyToMeasure)
+    }
+
+    /**
+     * 발 간격 허용폭은 잠정값이다. 이걸로 진행을 막으면 어깨너비보다 좁게 서는 습관이
+     * 있는 사람이 앱을 아예 쓸 수 없다 — 안내는 뜨지만 막지는 않는다.
+     */
+    @Test
+    fun `발 간격은 안내만 하고 측정을 막지 않는다`() {
+        val result = evaluate(frontPose(ankleHalfWidth = 0.10f))
+        assertTrue(ReadyIssue.STANCE_TOO_NARROW in result.issues)
+        assertTrue(result.blockingIssues.isEmpty())
+        assertTrue(result.readyToMeasure)
+    }
+
+    @Test
+    fun `발끝이 안쪽을 향하면 측정을 시작하지 않는다`() {
+        val result = evaluate(frontPose(ankleHalfWidth = 0.18f, toeOutward = -0.06f))
+        assertFalse(result.readyToMeasure)
+        assertTrue(ReadyIssue.TOES_INWARD in result.blockingIssues)
+    }
+
+    @Test
+    fun `좌우로 쏠리면 측정을 시작하지 않는다`() {
+        val result = evaluate(frontPose(ankleHalfWidth = 0.18f, hipCenterX = 0.56f))
+        assertFalse(result.readyToMeasure)
+        assertTrue(ReadyIssue.WEIGHT_ON_ONE_SIDE in result.blockingIssues)
+    }
+
+    @Test
+    fun `자세가 맞으면 측정을 시작한다`() {
+        assertTrue(evaluate(frontPose(ankleHalfWidth = 0.18f)).readyToMeasure)
+    }
+
+    /**
+     * 측면에서는 정면 전용 세 항목이 통째로 빠진다. 못 재는 것을 요구하면 측면 촬영으로는
+     * 영원히 시작할 수 없다.
+     */
+    @Test
+    fun `측면에서 못 보는 항목은 통과로 본다`() {
+        val result = evaluate(sidePose(), CameraAngle.SIDE)
+        assertTrue(result.notJudged.isNotEmpty())
+        assertTrue(result.readyToMeasure)
+    }
+
+    @Test
+    fun `아무것도 못 봤으면 시작하지 않는다`() {
+        val invisible = frontPose(confidence = 0.1f, toeConfidence = 0.1f)
+        assertFalse(evaluate(invisible).readyToMeasure)
+    }
+
+    @Test
+    fun `프레임이 없으면 시작하지 않는다`() {
+        assertFalse(ReadyPosture.EMPTY.readyToMeasure)
+    }
+
     @Test
     fun `방향이 어긋나면 그것이 첫 안내다`() {
         // 방향이 맞아야 나머지 세 항목을 판정할 수 있으므로 언제나 먼저 나와야 한다.

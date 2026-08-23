@@ -43,31 +43,52 @@ enum class ReadyCheck {
  *
  * 문구는 여기 두지 않는다. `FeedbackLabels`가 화면 문구를 독점하며, enum 이름이 그대로
  * 화면에 찍히는 사고를 막기 위한 것이다.
+ *
+ * @property blocking 이 문제가 있으면 **기준 자세 측정을 시작하지 않는다.**
+ *
+ * ## 무엇을 막고 무엇을 안 막는가
+ * 기준은 **그 판정의 근거가 확실한가**다([ThresholdOrigin]). 막는 항목이 오탐하면 사용자는
+ * 운동을 시작할 수 없다 — 틀린 경고보다 나쁘다.
+ *
+ * | 막는다 | 근거 |
+ * |---|---|
+ * | 방향(비스듬함) | 15세션 정답 대조, 0.15~0.55가 비어 있음 |
+ * | 무릎 펴기 | 이미 캘리브레이션 차단 조건이었다 |
+ * | 발끝 방향 | 기준점 0이 정의에서 나온다(부호만 본다) |
+ * | 좌우 균형 | 실측 12세션 READY에서 0/12 |
+ *
+ * | 안 막는다 | 이유 |
+ * |---|---|
+ * | 발 간격 | 허용폭이 [ThresholdOrigin.PROVISIONAL]이다 |
+ *
+ * 발 간격은 "지시 없이 편하게 선" 12세션의 간극에서 경계를 골랐고, 그 밖의 두 세션이
+ * 실제로 틀렸다는 증거가 없다([ReadyThresholds.stanceNarrowLimit]). 그 숫자로 진행을 막으면
+ * 어깨너비보다 좁게 서는 습관이 있는 사람이 **앱을 아예 쓸 수 없다.** 안내는 그대로 뜬다.
  */
-enum class ReadyIssue(val check: ReadyCheck) {
+enum class ReadyIssue(val check: ReadyCheck, val blocking: Boolean) {
     /** 정면을 골랐는데 옆으로 서 있다. */
-    TURN_TO_FRONT(ReadyCheck.FACING),
+    TURN_TO_FRONT(ReadyCheck.FACING, blocking = true),
 
     /** 측면을 골랐는데 정면으로 서 있다. */
-    TURN_TO_SIDE(ReadyCheck.FACING),
+    TURN_TO_SIDE(ReadyCheck.FACING, blocking = true),
 
     /** 정면도 측면도 아닌 비스듬한 방향. */
-    FACE_SQUARELY(ReadyCheck.FACING),
+    FACE_SQUARELY(ReadyCheck.FACING, blocking = true),
 
     /** 무릎이 덜 펴졌다. */
-    KNEES_BENT(ReadyCheck.KNEE_STRAIGHT),
+    KNEES_BENT(ReadyCheck.KNEE_STRAIGHT, blocking = true),
 
-    /** 발이 어깨보다 좁다. */
-    STANCE_TOO_NARROW(ReadyCheck.STANCE_WIDTH),
+    /** 발이 어깨보다 좁다. 허용폭이 잠정값이라 막지 않는다. */
+    STANCE_TOO_NARROW(ReadyCheck.STANCE_WIDTH, blocking = false),
 
-    /** 발이 어깨보다 넓다. */
-    STANCE_TOO_WIDE(ReadyCheck.STANCE_WIDTH),
+    /** 발이 어깨보다 넓다. 허용폭이 잠정값이라 막지 않는다. */
+    STANCE_TOO_WIDE(ReadyCheck.STANCE_WIDTH, blocking = false),
 
     /** 발끝이 안쪽을 향한다. */
-    TOES_INWARD(ReadyCheck.TOE_DIRECTION),
+    TOES_INWARD(ReadyCheck.TOE_DIRECTION, blocking = true),
 
     /** 골반이 한쪽으로 쏠렸다. */
-    WEIGHT_ON_ONE_SIDE(ReadyCheck.WEIGHT_BALANCE),
+    WEIGHT_ON_ONE_SIDE(ReadyCheck.WEIGHT_BALANCE, blocking = true),
 }
 
 /**
@@ -127,6 +148,23 @@ data class ReadyPosture(
 
     /** 가장 먼저 고칠 것. */
     val topIssue: ReadyIssue? get() = issues.firstOrNull()
+
+    /** 기준 자세 측정을 막는 문제. */
+    val blockingIssues: List<ReadyIssue> get() = issues.filter { it.blocking }
+
+    /**
+     * 지금 기준 자세를 재기 시작해도 되나.
+     *
+     * ## 못 본 항목은 통과로 본다
+     * 측면에서는 발 간격·발끝 방향·좌우 균형이 통째로 빠진다. 못 재는 것을 요구하면
+     * 측면 촬영으로는 영원히 시작할 수 없다.
+     *
+     * ## 아무것도 못 봤으면 통과가 아니다
+     * 사람이 안 보이는 것과 자세가 맞는 것은 다르다. 필수 관절 확인은 호출부가 따로
+     * 하지만([StandingCalibration.REQUIRED]), 여기서도 같은 규칙을 지킨다.
+     */
+    val readyToMeasure: Boolean
+        get() = framesUsed > 0 && judged.isNotEmpty() && blockingIssues.isEmpty()
 
     /** 판정하지 못한 이유. */
     enum class NotJudgedReason {
@@ -379,7 +417,7 @@ data class ReadyPosture(
                 leftToe = toeDirection(Side.LEFT),
                 rightToe = toeDirection(Side.RIGHT),
                 kneeFlexion = kneeFlexion,
-                view = CaptureQuality.estimateView(pose, aspect, minConfidence),
+                view = CaptureQuality.estimateView(pose, aspect, minConfidence = minConfidence),
             )
         }
 

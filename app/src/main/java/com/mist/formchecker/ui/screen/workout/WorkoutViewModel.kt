@@ -11,6 +11,7 @@ import com.mist.formchecker.data.WorkoutRepository
 import com.mist.formchecker.poseengine.RepScorer
 import com.mist.formchecker.poseengine.AngleEma
 import com.mist.formchecker.poseengine.CameraAngle
+import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CountingThresholds
 import com.mist.formchecker.poseengine.Delegate
 import com.mist.formchecker.poseengine.DepthLevel
@@ -312,6 +313,18 @@ class WorkoutViewModel @Inject constructor(
      */
     private val feedbackHold = FeedbackHold()
 
+    /**
+     * 사용자가 촬영 방향을 직접 골랐나. **개발 화면에서만 참이 된다.**
+     *
+     * 사용자용 화면은 방향 선택 버튼을 없앴고 판별은 자동이다. 그런데 개발 화면에는 각도
+     * 전환이 남아 있고, 그 화면의 목적은 **특정 각도의 판정을 확인하는 것**이다. 자동
+     * 판별이 다음 프레임에 그 선택을 덮어쓰면 수동 전환이 아무 일도 하지 않는 버튼이 된다.
+     *
+     * 한 번 고르면 그 화면을 떠날 때까지 유지한다 — 기준 자세를 다시 재도 풀지 않는다.
+     * 풀면 재측정 직후 자동 판별이 다시 덮어쓴다.
+     */
+    private var angleLockedByUser = false
+
     /** 상태 전이 안정화용. 위상 지연이 있어 최저점 탐색에는 쓰지 않는다. */
     private val kneeEma = AngleEma(config.smoothing.emaTimeConstantMs)
 
@@ -597,8 +610,21 @@ class WorkoutViewModel @Inject constructor(
             }
         }
 
-        // 카운팅과 독립적으로 돌린다. 기준선을 재는 중에도 rep은 세어져야 한다 — 사용자가
-        // 기준 자세를 잡는 동안 운동을 멈추라고 요구할 이유가 없다.
+        // 방향 판별용 창은 **항상** 채운다. 기준 자세를 재기 전에도 어느 방향으로 서
+        // 있는지 알아야 화면 문구가 맞는다([trackView]).
+        readyFrames.addLast(result.pose to result.aspectRatio)
+        while (readyFrames.size > READY_WINDOW_FRAMES) readyFrames.removeFirst()
+        trackView()
+
+        // 준비 자세 안내는 재는 중(PREPARING·COLLECTING)에만 갱신한다. 측정이 끝난 뒤에도
+        // 계속 갱신하면 스쿼트 첫 프레임이 "발이 좁아요"로 읽힌다 — 앉기 시작하면 발목
+        // 간격과 무릎 굴곡이 당연히 달라진다.
+        //
+        // **캘리브레이션보다 먼저 계산한다** — 3초 창을 시작할지 이 결과가 정한다.
+        if (_uiState.value.calibrationStage.isMeasuring) {
+            stepReadyPosture()
+        }
+
         when (_uiState.value.calibrationStage) {
             CalibrationStage.COLLECTING -> stepCalibration(result)
             // 준비 중에는 재지 않는다. 대신 지금 서 있는 자리가 되는지만 알려준다 —
@@ -612,13 +638,6 @@ class WorkoutViewModel @Inject constructor(
                 }
             }
             else -> Unit
-        }
-
-        // 준비 자세 안내는 재는 중(PREPARING·COLLECTING)에만 갱신한다. 측정이 끝난 뒤에도
-        // 계속 갱신하면 스쿼트 첫 프레임이 "발이 좁아요"로 읽힌다 — 앉기 시작하면 발목
-        // 간격과 무릎 굴곡이 당연히 달라진다.
-        if (_uiState.value.calibrationStage.isMeasuring) {
-            stepReadyPosture(result)
         }
 
         // rep 깊이는 상태와 저장이 같은 값을 써야 하므로 여기서 한 번만 계산한다.
@@ -854,7 +873,16 @@ class WorkoutViewModel @Inject constructor(
         val usable = StandingCalibration.REQUIRED.all {
             result.pose.isReliable(it, StandingCalibration.MIN_CONFIDENCE)
         }
-        if (!usable) {
+        // **준비 자세를 통과해야 3초를 센다.**
+        //
+        // 예전에는 관절만 보였으면 3초를 세고 **끝난 뒤에** 실패를 알렸다 — 45도로 서
+        // 있으면 3초를 기다린 다음 "비스듬해요"를 들었다. 기다렸다 실패하는 것이 가장
+        // 나쁜 순서다. 조건이 어긋나면 창을 채우지 않고 왜 안 세는지만 보여준다.
+        //
+        // 막는 항목은 근거가 확실한 것만이다 — 발 간격 허용폭은 잠정값이라 안내만 한다
+        // ([ReadyIssue.blocking]).
+        val postureReady = _uiState.value.readyPosture.readyToMeasure
+        if (!usable || !postureReady) {
             calibrationFrames.clear()
             calibrationStartMs = null
             _uiState.update { it.copy(calibrationRemainingMs = CALIBRATION_DURATION_MS) }
@@ -877,10 +905,7 @@ class WorkoutViewModel @Inject constructor(
      * 창을 굴리며 매 프레임 다시 계산한다. 프레임당 비용은 관절 몇 개의 거리 계산이고,
      * 이미 프레임마다 특징을 전부 계산하고 있으므로 추론 지연에 영향을 주지 않는다.
      */
-    private fun stepReadyPosture(result: PoseResult) {
-        readyFrames.addLast(result.pose to result.aspectRatio)
-        while (readyFrames.size > READY_WINDOW_FRAMES) readyFrames.removeFirst()
-
+    private fun stepReadyPosture() {
         val posture = ReadyPosture.from(
             frames = readyFrames.toList(),
             cameraAngle = _uiState.value.cameraAngle,
@@ -888,6 +913,35 @@ class WorkoutViewModel @Inject constructor(
             ready = config.ready,
         )
         _uiState.update { it.copy(readyPosture = posture) }
+    }
+
+    /**
+     * 카운팅이 시작되기 전까지는 촬영 방향을 실시간으로 따라간다.
+     *
+     * ## 왜 필요한가
+     * 방향을 사용자가 고르지 않으므로, 기준 자세를 재기 전의 기본값은 아무 근거가 없다.
+     * 그 상태로 판정하면 옆으로 선 사람에게 정면 문구가 나가고, 준비 자세 안내도 정면
+     * 전용 항목을 엉뚱하게 켠다.
+     *
+     * ## 왜 카운팅이 시작되면 멈추는가
+     * 기준선은 **그 방향에서 잰 값**이다(활성측·분모·원근 조건이 모두 다르다). rep을 세는
+     * 동안 방향이 바뀌면 기준선과 판정이 어긋나므로, 확정 뒤에는 따라가지 않고 안내만 한다
+     * ([SquatForm.suggestedAngle]).
+     *
+     * ## 왜 프레임 하나로 바꾸지 않는가
+     * 창의 다수결을 쓴다. 프레임 단위 추정은 실측에서 0.5%가 반대로 읽혀 화면 문구가
+     * 깜빡인다.
+     */
+    private fun trackView() {
+        if (angleLockedByUser) return
+        if (_uiState.value.countingEnabled) return
+        val detected = viewOf(readyFrames.toList()) ?: return
+        if (detected == _uiState.value.cameraAngle) return
+
+        // 방향이 바뀌면 판정 항목이 통째로 갈린다. 이전 방향에서 붙잡아 둔 피드백은
+        // 지금 방향에서는 재지도 않는 항목일 수 있다.
+        feedbackHold.reset()
+        _uiState.update { it.copy(cameraAngle = detected, heldWarnings = emptyList()) }
     }
 
     private fun finishCalibration() {
@@ -903,12 +957,27 @@ class WorkoutViewModel @Inject constructor(
             return
         }
 
+        // **촬영 방향을 여기서 확정한다.** 사용자가 고르지 않는다.
+        //
+        // 프레임 하나로는 정하면 안 된다 — 실측에서 정면·측면 각각 0.5%가 반대로 읽히고
+        // 그게 두 세션에 몰려 있다. 창 전체의 다수결은 15/15 전부 맞았다
+        // (`CaptureQuality.estimateView` 주석의 표).
+        // 수동으로 고른 각도는 덮어쓰지 않는다(개발 화면).
+        val detected = if (angleLockedByUser) _uiState.value.cameraAngle else viewOf(frames)
+        if (detected == null) {
+            // 비스듬하게 서 있거나 어깨가 안 보인다. 어느 판정을 켤지 정할 수 없으므로
+            // 진행하지 않는다 — 방향을 모르는 채로 재면 그 기준선이 어느 각도의 것인지도
+            // 알 수 없다.
+            failCalibration(listOf(StandingCalibration.Problem.AMBIGUOUS_VIEW))
+            return
+        }
+
         // 창 전체로 다시 계산한다. 실시간 안내는 최근 몇 프레임만 보므로, 결과로 남길
         // 값은 캘리브레이션 창 전체에서 낸 쪽이 안정적이다 — 프레임이 많을수록 중앙값이
         // 흔들리지 않는다.
         val readyPosture = ReadyPosture.from(
             frames = frames,
-            cameraAngle = _uiState.value.cameraAngle,
+            cameraAngle = detected,
             form = config.form,
             ready = config.ready,
         )
@@ -928,7 +997,13 @@ class WorkoutViewModel @Inject constructor(
                 calibrationStage = CalibrationStage.READY,
                 calibration = calibration,
                 readyPosture = readyPosture,
-                activeSide = nearSideOf(frames),
+                cameraAngle = detected,
+                // 정면에서는 좌우를 모두 쓰므로 고정하지 않는다.
+                activeSide = if (detected == CameraAngle.SIDE) {
+                    StandingCalibration.nearerSide(frames)
+                } else {
+                    null
+                },
                 calibrationRemainingMs = 0,
                 // 차단하지 않는 문제(발 미검출)는 남겨서 어떤 특징이 빠지는지 알린다.
                 calibrationProblems = validation.problems,
@@ -952,15 +1027,17 @@ class WorkoutViewModel @Inject constructor(
     }
 
     /**
-     * 활성측을 정한다. 정면에서는 좌우 모두 쓰므로 고정하지 않는다.
+     * 프레임 창에서 촬영 방향을 정한다. 애매하거나 추정 불가면 null이다.
      *
-     * 판단은 [StandingCalibration.nearerSide]가 한다 — 어느 관절 신뢰도를 보는지는 엔진
-     * 쪽 규칙이고, 화면이 알 필요가 없다.
+     * 판별 계산은 [CaptureQuality]가 한다 — 경계값을 아는 것은 엔진 쪽 일이고, 예전에
+     * 같은 계산이 두 곳에 있어 경계가 갈라진 적이 있다.
      */
-    private fun nearSideOf(frames: List<Pair<Pose, Float>>): Side? {
-        if (_uiState.value.cameraAngle == CameraAngle.FRONT) return null
-        return StandingCalibration.nearerSide(frames)
-    }
+    private fun viewOf(frames: List<Pair<Pose, Float>>): CameraAngle? =
+        when (CaptureQuality.estimateView(frames, config.angleDetection)) {
+            CaptureQuality.EstimatedView.FRONT -> CameraAngle.FRONT
+            CaptureQuality.EstimatedView.SIDE -> CameraAngle.SIDE
+            CaptureQuality.EstimatedView.AMBIGUOUS, null -> null
+        }
 
     /**
      * 현재 프레임 특징.
@@ -1108,6 +1185,8 @@ class WorkoutViewModel @Inject constructor(
      */
     fun selectCameraAngle(angle: CameraAngle) {
         if (_uiState.value.cameraAngle == angle) return
+        // 직접 골랐으면 자동 판별을 끈다. 켜둔 채로 두면 다음 프레임에 덮어써진다.
+        angleLockedByUser = true
         resetRepTracking()
         calibrationFrames.clear()
         calibrationStartMs = null

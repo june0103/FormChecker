@@ -13,14 +13,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,6 +122,8 @@ private fun ExerciseContent(
         if (state.engineReady) viewModel.createAnalyzer() else null
     }
 
+    var exitConfirm by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -149,7 +155,9 @@ private fun ExerciseContent(
                     ExerciseHud(
                         state = state,
                         onReset = viewModel::resetRepCount,
-                        onSwitchAngle = viewModel::selectCameraAngle,
+                        onToggleCamera = viewModel::toggleCamera,
+                        // 아이콘이 작아져 실수로 눌릴 수 있다. 센 횟수가 있으면 먼저 묻는다.
+                        onBack = { if (state.repCount > 0) exitConfirm = true else onBack() },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -160,11 +168,9 @@ private fun ExerciseContent(
             }
         }
 
-        CameraAngleSelector(
-            selected = state.cameraAngle,
-            onSelect = viewModel::selectCameraAngle,
-        )
-
+        // 촬영 방향 선택 버튼을 없앴다. 기준 자세 창의 다수결이 정한다 —
+        // 사용자가 고를 이유가 없고(자기가 어느 방향으로 서 있는지는 앱이 더 잘 안다),
+        // 고르게 두면 잘못 고른 채로 운동해도 앱이 아무 말 없이 틀린 판정을 낸다.
         CalibrationBar(
             state = state,
             onStart = viewModel::startCalibration,
@@ -175,35 +181,68 @@ private fun ExerciseContent(
             collapseDetails = true,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            OutlinedButton(
-                onClick = viewModel::toggleCamera,
-                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text(
-                    if (state.isFrontCamera) "후면" else "전면",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            OutlinedButton(
-                onClick = onBack,
-                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text("뒤로", style = MaterialTheme.typography.labelMedium)
-            }
-            Button(
-                // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
-                // 아직 없는 행을 조회하게 된다.
-                onClick = { viewModel.finishSession(onFinish) },
-                modifier = Modifier.weight(2f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text("운동 종료", style = MaterialTheme.typography.labelMedium)
-            }
+        // 카메라 전환과 뒤로가기는 HUD 좌우 상단으로 올렸다. 이 줄에 남는 것은 세션을
+        // 끝내는 동작 하나뿐이라 폭을 다 쓴다.
+        //
+        // **채운 버튼이 아니라 외곽선이다.** 위의 "기준 자세 재기"도 폭을 다 쓰는데, 둘 다
+        // 채운 버튼이면 같은 크기·같은 색이 위아래로 붙어 잘못 누른다. 그리고 지금 화면의
+        // 다음 할 일은 기준 자세를 재는 것이고, 종료는 언제든 빠져나가는 보조 동작이다.
+        OutlinedButton(
+            // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
+            // 아직 없는 행을 조회하게 된다.
+            onClick = { viewModel.finishSession(onFinish) },
+            modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+        ) {
+            Text("운동 종료", style = MaterialTheme.typography.labelLarge)
         }
     }
+
+    if (exitConfirm) {
+        ExitConfirmDialog(
+            repCount = state.repCount,
+            onDismiss = { exitConfirm = false },
+            onLeave = {
+                exitConfirm = false
+                onBack()
+            },
+        )
+    }
+}
+
+/**
+ * 저장하지 않고 나가려 할 때 묻는다.
+ *
+ * ## 왜 필요해졌나
+ * 뒤로가기가 하단의 글자 버튼에서 HUD 좌상단의 작은 아이콘으로 옮겨졌다. 화면 모서리는
+ * 스크롤이나 제스처 중에 실수로 닿기 쉬운 자리이고, **뒤로가기는 세션을 저장하지 않는다** —
+ * 한 번의 오터치로 방금 한 운동이 사라진다.
+ *
+ * ## 왜 "저장하고 나가기"를 넣지 않는가
+ * 그건 이미 "운동 종료" 버튼이다. 선택지를 셋으로 늘리면 급할 때 잘못 누른다. 여기서는
+ * **되돌릴 수 없는 쪽을 명시적으로 고르게** 하는 것만 한다.
+ */
+@Composable
+private fun ExitConfirmDialog(
+    repCount: Int,
+    onDismiss: () -> Unit,
+    onLeave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("운동을 그만둘까요?") },
+        text = {
+            Text(
+                "지금까지 센 ${repCount}번은 저장되지 않아요. " +
+                    "기록을 남기려면 '운동 종료'를 눌러 주세요.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("계속하기") }
+        },
+        dismissButton = {
+            TextButton(onClick = onLeave) { Text("저장 안 하고 나가기") }
+        },
+    )
 }
 
 /**
@@ -219,7 +258,8 @@ private fun ExerciseContent(
 private fun ExerciseHud(
     state: WorkoutUiState,
     onReset: () -> Unit,
-    onSwitchAngle: (com.mist.formchecker.poseengine.CameraAngle) -> Unit,
+    onToggleCamera: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.SpaceBetween) {
@@ -230,9 +270,27 @@ private fun ExerciseHud(
                 .background(
                     Brush.verticalGradient(listOf(Scrim.copy(alpha = 0.75f), Color.Transparent)),
                 )
-                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                // 아이콘이 모서리에 붙어야 카메라 앱처럼 읽힌다. 가로 여백을 줄인다.
+                .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // 좌우 상단 아이콘. 카운터와 **한 줄에 겹치지 않게** 위에 따로 둔다 —
+            // 겹쳐 배치하면 "아직 세지 않아요" 같은 긴 줄이 아이콘 아래로 흘러 들어간다.
+            // HUD는 오버레이라 이 줄이 카메라를 줄이지는 않는다.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                HudAction(label = "뒤로", onClick = onBack, glyph = { drawBackGlyph(it) })
+                HudAction(
+                    // 어느 렌즈로 바뀌는지를 이름에 담는다 — "전환"만으로는 지금이 어느
+                    // 쪽인지 알 수 없다.
+                    label = if (state.isFrontCamera) "후면" else "전면",
+                    onClick = onToggleCamera,
+                    glyph = { drawCameraFlipGlyph(it) },
+                )
+            }
+
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = state.repCount.toString(),
@@ -302,11 +360,10 @@ private fun ExerciseHud(
             val form = state.form
 
             // 조치가 필요한 것부터: 각도 안내 → 경고 → 인식 실패.
+            // 판정 중인 방향과 실제 방향이 다르면 알린다. **전환 버튼은 없다** —
+            // 기준선이 그 방향에서 잰 값이라 방향만 바꾸면 어긋난다. 다시 재야 한다.
             form?.suggestedAngle?.let { suggested ->
-                AngleMismatchNotice(
-                    suggested = suggested,
-                    onSwitch = { onSwitchAngle(suggested) },
-                )
+                AngleMismatchNotice(suggested = suggested, onSwitch = null)
             }
 
             state.heldWarnings.forEach { FormWarningRow(it) }

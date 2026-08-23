@@ -153,7 +153,8 @@ class SquatFormAnalyzer(
             } else {
                 null
             },
-            suggestedAngle = detectAngle(pose)?.takeIf { it != cameraAngle },
+            suggestedAngle = detectAngle(pose, frameAspectRatio)
+                ?.takeIf { it != cameraAngle },
             // 무릎 정렬은 이제 프레임 단위다 — 무릎–발끝 정렬은 기준점이 0이라
             // 선 자세 기준선이 필요 없다.
             warnings = warningsOf(
@@ -285,35 +286,29 @@ class SquatFormAnalyzer(
     }
 
     /**
-     * 어깨 폭과 몸통 길이의 비율로 실제 촬영 각도를 추정한다.
+     * 실제 촬영 방향을 추정한다. **계산은 [CaptureQuality.estimateView]에 위임한다.**
      *
-     * 정면에서는 두 어깨가 넓게 벌어져 보이지만, 측면에서는 앞뒤로 겹쳐 거의 한 점이 된다.
-     * 몸통 길이로 나눠 정규화하면 사람의 체격·카메라 거리와 무관해진다.
+     * 예전에는 같은 계산이 이 파일에도 있었고 경계값이 갈라져 있었다(측면 0.25 vs 0.30).
+     * 한 곳만 고치는 실수가 반드시 생기는 모양이었다.
      *
-     * 사용자가 고른 각도를 **덮어쓰지 않고 안내만** 하는 용도다. 이 추정이 없으면 측면
-     * 모드로 정면에 서 있어도 앱이 아무 말 없이 틀린 깊이를 계산하게 된다.
+     * 여기서는 **프레임 하나**로 추정한다 — 사용자가 운동 중에 돌아섰는지 알려주는
+     * 용도이고, 그건 즉시 알려야 하는 정보다. 반면 어느 방향으로 판정할지는 프레임 하나로
+     * 정하면 안 된다(오분류 0.5%가 rep 안에서 판정을 뒤집는다). 그쪽은 캘리브레이션 창의
+     * 다수결이 정한다.
+     *
+     * ## 종횡비를 넘긴다
+     * 예전 구현은 x 좌표 차를 그대로 썼다(종횡비 보정 없음). 어깨폭은 가로 거리, 몸통
+     * 길이는 거의 세로 거리라 **그 비율이 화면 비율만큼 어긋나 있었다.** 임계값을 확정한
+     * 실측 분석은 등방 좌표로 계산했으므로 이쪽이 맞다.
      */
-    private fun detectAngle(pose: Pose): CameraAngle? {
-        val shoulderSpread = horizontalSpread(
-            pose, KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER,
-        ) ?: return null
-        val shoulder = midpoint(
-            pose, KeypointType.LEFT_SHOULDER, KeypointType.RIGHT_SHOULDER,
-        ) ?: return null
-        val hip = midpoint(pose, KeypointType.LEFT_HIP, KeypointType.RIGHT_HIP) ?: return null
-
-        val torsoLength = hypot(shoulder.first - hip.first, shoulder.second - hip.second)
-        if (torsoLength < detection.minTorsoLength) return null
-
-        val ratio = shoulderSpread / torsoLength
-        return when {
-            ratio >= detection.frontRatio -> CameraAngle.FRONT
-            ratio <= detection.sideRatio -> CameraAngle.SIDE
+    private fun detectAngle(pose: Pose, aspectRatio: Float): CameraAngle? =
+        when (CaptureQuality.estimateView(pose, aspectRatio, detection, minConfidence)) {
+            CaptureQuality.EstimatedView.FRONT -> CameraAngle.FRONT
+            CaptureQuality.EstimatedView.SIDE -> CameraAngle.SIDE
             // 애매한 구간에서는 추정하지 않는다. 어설픈 안내가 반복되면 사용자가
             // 경고 자체를 무시하게 된다.
-            else -> null
+            CaptureQuality.EstimatedView.AMBIGUOUS, null -> null
         }
-    }
 
     private fun midpoint(pose: Pose, a: KeypointType, b: KeypointType): Pair<Float, Float>? {
         if (!pose.isReliable(a, minConfidence) || !pose.isReliable(b, minConfidence)) return null
