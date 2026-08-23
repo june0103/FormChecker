@@ -58,6 +58,7 @@ fun SessionSummaryScreen(
     sessionId: String,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    showDiagnostics: Boolean = false,
     viewModel: SessionSummaryViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
@@ -72,64 +73,57 @@ fun SessionSummaryScreen(
     ) {
         Text("운동 결과", style = MaterialTheme.typography.headlineSmall)
 
-        when {
-            state.loading -> Text(
-                "불러오는 중…",
-                style = MaterialTheme.typography.bodyMedium,
-                color = FeedbackInfo,
-            )
-
-            state.session == null -> Text(
-                // 조용히 빈 화면을 보여주면 사용자는 기록이 사라졌다고 생각한다.
-                "이 세션을 찾을 수 없습니다.\n세션 ID: $sessionId",
-                style = MaterialTheme.typography.bodyMedium,
-                color = FeedbackWarning,
-            )
-
-            else -> {
-                SummaryCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Stat("총 횟수", state.reps.size.toString())
-                        Stat("확인한 횟수", state.judgedReps.toString())
-                        Stat(
-                            label = "짚은 횟수",
-                            value = state.warnedReps.toString(),
-                            color = if (state.warnedReps == 0) FeedbackSuccess else FeedbackWarning,
-                        )
-                    }
-                    val unjudged = state.reps.size - state.judgedReps
-                    if (unjudged > 0) {
-                        Spacer(Modifier.height(Spacing.sm))
-                        Text(
-                            // 판정 불가와 "괜찮았다"를 구분해 준다. 이 문장이 없으면
-                            // 경고 0건이 자세가 좋았다는 뜻으로 읽힌다.
-                            "${unjudged}번은 자세를 확인하지 못했어요. " +
-                                "카메라에 몸이 다 들어오지 않았거나 방향이 맞지 않았을 수 있어요.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = FeedbackInfo,
-                        )
-                    }
+        // 화면 전체가 하나의 스크롤이다.
+        //
+        // 이전에는 카드들을 고정 높이로 쌓고 rep 목록만 weight(1f)로 두었는데, **피드백이
+        // 길어지면 고정 카드들의 합이 화면 높이를 넘어 아래 버튼이 잘렸다** — 실기기에서
+        // "홈으로"가 화면 밖으로 밀려 눌리지 않았다. 해상도마다 잘리는 지점이 달라
+        // 카드 높이를 조정하는 방식으로는 못 고친다.
+        //
+        // 버튼은 이 스크롤 **밖**에 두어 항상 보이게 한다.
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            when {
+                state.loading -> item {
+                    Text(
+                        "불러오는 중…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FeedbackInfo,
+                    )
                 }
 
-                // 리포트를 성능 카드보다 먼저 둔다 — 사용자가 이 화면에서 찾는 것은
-                // 추론 지연이 아니라 "무엇을 고쳐야 하나"다.
-                state.report?.let { SessionReportCard(it) }
+                state.session == null -> item {
+                    Text(
+                        // 조용히 빈 화면을 보여주면 사용자는 기록이 사라졌다고 생각한다.
+                        "이 세션을 찾을 수 없습니다.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FeedbackWarning,
+                    )
+                }
 
-                state.metrics?.let { PerformanceCard(it) }
+                else -> {
+                    item { OverviewCard(state) }
 
-                Text(
-                    "동작별 기록",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                LazyColumn(
-                    // 카드가 늘어나도 rep 목록이 최소 높이를 갖도록 weight를 준다.
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-                ) {
-                    items(state.reps, key = { it.id }) { RepRow(it) }
+                    state.report?.let { report ->
+                        item { SessionReportCard(report) }
+                    }
+
+                    // 성능은 개발 화면에서 넘어왔을 때만 띄운다. 사용자에게는 조치할 수
+                    // 없는 값이고, 그만큼 피드백과 동작 기록이 아래로 밀린다.
+                    if (showDiagnostics) {
+                        state.metrics?.let { metrics ->
+                            item { PerformanceCard(metrics) }
+                        }
+                    }
+
+                    if (state.reps.isNotEmpty()) {
+                        item {
+                            Text("동작별 기록", style = MaterialTheme.typography.titleSmall)
+                        }
+                        items(state.reps, key = { it.id }) { RepRow(it) }
+                    }
                 }
             }
         }
@@ -139,6 +133,40 @@ fun SessionSummaryScreen(
             modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
         ) {
             Text("홈으로")
+        }
+    }
+}
+
+/**
+ * 세션 한눈에.
+ *
+ * "확인한 횟수"를 함께 보여주는 이유: 판정하지 못한 동작이 있으면 **"짚은 횟수 0"이
+ * "자세가 좋았다"로 읽힌다.** 분모를 보여줘야 그 차이가 드러난다 (설계문서 4.2절).
+ */
+@Composable
+private fun OverviewCard(state: SessionSummaryState) {
+    SummaryCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Stat("총 횟수", state.reps.size.toString())
+            Stat("확인한 횟수", state.judgedReps.toString())
+            Stat(
+                label = "짚은 횟수",
+                value = state.warnedReps.toString(),
+                color = if (state.warnedReps == 0) FeedbackSuccess else FeedbackWarning,
+            )
+        }
+        val unjudged = state.reps.size - state.judgedReps
+        if (unjudged > 0) {
+            Spacer(Modifier.height(Spacing.sm))
+            Text(
+                "${unjudged}번은 자세를 확인하지 못했어요. " +
+                    "카메라에 몸이 다 들어오지 않았거나 방향이 맞지 않았을 수 있어요.",
+                style = MaterialTheme.typography.bodySmall,
+                color = FeedbackInfo,
+            )
         }
     }
 }

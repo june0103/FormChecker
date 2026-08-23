@@ -33,7 +33,18 @@ data object Workout
  * 오프라인 큐의 멱등 upsert를 위해 서버가 아니라 클라이언트가 미리 만든다).
  */
 @Serializable
-data class SessionSummary(val sessionId: String)
+data class SessionSummary(
+    val sessionId: String,
+    /**
+     * 성능 지표 카드를 보여주나.
+     *
+     * 설계문서 173행은 추론 지연·프레임 드랍을 이 화면에 노출하라고 했지만, 그건 **성능
+     * 스토리를 설명하기 위한 요구**였다. 사용자에게는 조치할 수 없는 값이라
+     * [WorkoutLab]에서 넘어온 경우에만 켠다 — 개발 화면과 결과 화면이 짝이 되어야
+     * 판정과 성능을 한 흐름에서 확인할 수 있다.
+     */
+    val diagnostics: Boolean = false,
+)
 
 /**
  * 기준 자세 데이터 수집 모드 (설계문서 확장 · 데이터 명세서 §4).

@@ -14,6 +14,7 @@
 - **모듈**: `:pose-engine` 분리 완료 (UI와 독립된 ML·판정 계층)
 - **추론 모델**: `app/src/main/assets/`에 두 개. **기본은 RTMPose-s Halpe26(26 keypoint)**이고 MoveNet Lightning(17 keypoint, COCO)은 비교용으로만 남아 있습니다. MoveNet에는 발 키포인트가 없어 뒤꿈치 들림·발끝 정렬을 아예 계산할 수 없습니다 — **새 판정을 추가할 때 MoveNet 경로를 가정하지 마세요.**
 - **화면**: Exercise(사용자용 운동), WorkoutLab(개발·검증용 운동), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·업로드 대기 배지) 완성. Splash·Home 있음
+- **결과 화면도 짝입니다**: `SessionSummary(sessionId, diagnostics)` — 개발용 운동에서 끝내면 성능 카드가 켜지고, 사용자용에서는 꺼집니다. 화면 전체가 하나의 `LazyColumn`이고 "홈으로" 버튼만 스크롤 밖에 고정입니다 — **고정 높이 카드를 쌓지 마세요**, 피드백이 길어지면 해상도에 따라 버튼이 잘립니다
 - **운동 화면이 두 벌입니다**: `ExerciseScreen`(사용자용)과 `WorkoutScreen`(개발용)이 **`WorkoutViewModel` 하나를 공유**합니다 — 동작은 같고 표시만 다릅니다. 개발 화면에는 관절 각도·정규화 원값·추론 지연·모델 전환이 올라가 있고, 새 판정을 추가할 때 기기에서 확인하는 자리입니다. **판정 로직을 화면에 넣지 마세요** — 넣으면 두 화면이 다른 답을 냅니다. 공용 UI는 `WorkoutControls.kt`
 - **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
 - **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉으실 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
