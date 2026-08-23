@@ -49,7 +49,7 @@ import com.mist.formchecker.ui.theme.SurfaceCard
  *
  * ## 문제가 없을 때 "잘했다"고 하지 않는다
  * 확정된 임계값 전부가 "정상을 오탐하지 않는가"만 검증됐고 **"오류를 잡는가"는 미검증**이다
- * (의도적 오류 세션이 아직 없다). 말투는 부드럽게 하되 **"짚을 부분이 없었다"는 사실**까지만
+ * (의도적 오류 세션이 아직 없다). 말투는 부드럽게 하되 **"드릴 피드백이 없었다"는 사실**까지만
  * 말한다 — "자세가 좋아요"는 데이터가 뒷받침하지 못한다.
  */
 @Composable
@@ -76,7 +76,7 @@ fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
 
             !hasFindings -> Text(
                 // "자세가 좋아요"라고 쓰지 않는다 — 임계값이 오류를 잡는지는 미검증이다.
-                "${report.judgedReps}번 모두 확인했는데 따로 짚을 부분은 없었어요.",
+                "${report.judgedReps}번 모두 확인했는데 따로 드릴 피드백은 없었어요.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = FeedbackSuccess,
             )
@@ -91,7 +91,7 @@ fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
         if (report.notJudged.isNotEmpty()) {
             Spacer(Modifier.height(Spacing.xs))
             Text(
-                // 못 본 것을 말하지 않으면 "짚을 게 없다"가 "전부 괜찮다"로 읽힌다.
+                // 못 본 것을 말하지 않으면 "피드백이 없다"가 "전부 괜찮다"로 읽힌다.
                 report.notJudged.sentence(),
                 style = MaterialTheme.typography.bodySmall,
                 color = FeedbackInfo,

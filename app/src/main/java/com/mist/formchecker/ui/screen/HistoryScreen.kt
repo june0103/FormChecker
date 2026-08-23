@@ -152,7 +152,7 @@ private fun SessionRow(item: SessionListItem, onOpen: () -> Unit, onDelete: () -
                     buildString {
                         append("${item.repCount}번")
                         if (item.repCount > 0) {
-                            append(" · 짚은 곳 ${item.warnedRepCount}번")
+                            append(" · 피드백 ${item.warnedRepCount}번")
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
