@@ -418,6 +418,28 @@ private fun HudBottomBand(
             }
         }
 
+        // 준비 자세 원값. 허용폭이 잠정값(발 간격)이거나 부호만 쓰는 항목(발끝 방향)이라
+        // **기기에서 실제 숫자를 봐야** 경계를 옮길 근거가 생긴다. 사용자용 화면에는
+        // 문구만 나가고 이 줄은 개발 화면에만 있다.
+        state.readyPosture.takeIf { it.framesUsed > 0 }?.let { ready ->
+            val values = buildList {
+                ready.stanceWidthByShoulder?.let { add("발간격/어깨 ${it.formatRatio()}") }
+                ready.leftToeDirection?.let { add("발끝(왼) ${it.formatRatio()}") }
+                ready.rightToeDirection?.let { add("발끝(오른) ${it.formatRatio()}") }
+                ready.hipShiftRatio?.let { add("힙쏠림 ${it.formatRatio()}") }
+                ready.standingKneeFlexion?.let { add("기립무릎 ${it.format()}°") }
+                ready.estimatedView?.let { add("추정 ${it.name}") }
+            }
+            if (values.isNotEmpty()) {
+                Text(
+                    text = "준비 · " + values.joinToString("  ·  ") +
+                        "  (${ready.framesUsed}프레임)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                )
+            }
+        }
+
         // 개발용 수치. 사용자에게는 의미가 없어 최소 크기로 두고, 나중에 토글로 끈다.
         Text(
             text = buildString {
