@@ -353,8 +353,13 @@ class WorkoutViewModel @Inject constructor(
      */
     private var repDeepestKnee: KneeAtBottom? = null
 
-    /** [repDeepestKnee]가 담는 것. 세 값이 **같은 프레임**에서 나와야 한다. */
-    private data class KneeAtBottom(val depth: Float, val side: Side, val deviation: Float)
+    /**
+     * [repDeepestKnee]가 담는 것. 세 값이 **같은 프레임**에서 나와야 한다.
+     *
+     * [side]가 nullable인 이유: 그 프레임의 정렬이 GOOD이면 분석기가 쪽을 남기지 않는다.
+     * 경고가 없으면 쪽도 쓸 일이 없으므로 그대로 둔다.
+     */
+    private data class KneeAtBottom(val depth: Float, val side: Side?, val deviation: Float)
 
     /** 준비 시간 카운트다운. 취소·재시작·화면 이탈 시 반드시 끊어야 한다. */
     private var prepJob: Job? = null
@@ -492,13 +497,22 @@ class WorkoutViewModel @Inject constructor(
             repWarnings += form.warnings
             // 무릎은 가장 깊은 프레임의 값만 남긴다. 깊이는 무릎의 좌우 이동과 무관한
             // 세로 거리라 이 비교가 판정 대상에 오염되지 않는다.
+            //
+            // ⚠ 쪽(`kneeToeSide`)을 조건에 넣으면 안 된다. 그 값은 정렬이 GOOD이면 null이라
+            // (SquatFormAnalyzer 참고), 조건에 넣으면 **이미 경고가 난 프레임만** 추적하게
+            // 된다. 그러면 최저점이 정상이어도 얕은 구간의 잔차가 대표값이 되어, 없애려던
+            // 오탐이 그대로 남는다.
             val deviation = form.kneeToeDeviation
-            val side = form.kneeToeSide
             val depth = features?.shinDepthRatio
-            if (deviation != null && side != null && depth != null &&
+            if (deviation != null && depth != null &&
                 depth > (repDeepestKnee?.depth ?: Float.NEGATIVE_INFINITY)
             ) {
-                repDeepestKnee = KneeAtBottom(depth = depth, side = side, deviation = deviation)
+                repDeepestKnee = KneeAtBottom(
+                    depth = depth,
+                    // 최저점이 정상이면 쪽이 없다. 그때는 경고도 없으니 쓸 일이 없다.
+                    side = form.kneeToeSide,
+                    deviation = deviation,
+                )
             }
         }
         form.depthRatio?.let { ratio ->
