@@ -44,10 +44,15 @@ object FeedbackLabels {
         FormWarning.KNEE_VALGUS, FormWarning.KNEE_FLARED -> "무릎 방향"
     }
 
-    /** 어느 방향에서 찍었나. `SIDE`/`FRONT`를 그대로 보여주고 있었다. */
+    /**
+     * 어느 방향에서 찍었나. `SIDE`/`FRONT`를 그대로 보여주고 있었다.
+     *
+     * "옆에서/앞에서"가 아니라 "측면/정면"을 쓴다 — 동작 기록은 한 줄에 시간·방향·깊이를
+     * 나열하는 자리라 명사가 붙고, 둘 다 일상어라 설명 없이 읽힌다.
+     */
     fun angle(cameraAngle: CameraAngle): String = when (cameraAngle) {
-        CameraAngle.SIDE -> "옆에서"
-        CameraAngle.FRONT -> "앞에서"
+        CameraAngle.SIDE -> "측면"
+        CameraAngle.FRONT -> "정면"
     }
 
     /** 저장된 문자열을 읽을 때. 스키마가 손상되면 원문을 그대로 보여준다. */
