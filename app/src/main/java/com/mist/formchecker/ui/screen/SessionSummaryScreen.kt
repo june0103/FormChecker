@@ -140,7 +140,7 @@ fun SessionSummaryScreen(
 /**
  * 세션 한눈에.
  *
- * "확인한 횟수"를 함께 보여주는 이유: 판정하지 못한 동작이 있으면 **"짚은 횟수 0"이
+ * "확인한 횟수"를 함께 보여주는 이유: 판정하지 못한 동작이 있으면 **"피드백 횟수 0"이
  * "자세가 좋았다"로 읽힌다.** 분모를 보여줘야 그 차이가 드러난다 (설계문서 4.2절).
  */
 @Composable
@@ -153,7 +153,7 @@ private fun OverviewCard(state: SessionSummaryState) {
             Stat("총 횟수", state.reps.size.toString())
             Stat("확인한 횟수", state.judgedReps.toString())
             Stat(
-                label = "짚은 횟수",
+                label = "피드백 횟수",
                 value = state.warnedReps.toString(),
                 color = if (state.warnedReps == 0) FeedbackSuccess else FeedbackWarning,
             )
