@@ -181,6 +181,13 @@ private fun Finding.advice(): String {
             "${when_}${where}무릎이 발끝보다 바깥으로 벌어져요. " +
                 "무릎을 발끝 방향에 맞춰 주세요."
 
+        // 뒤꿈치를 억지로 붙이라고 하지 않는다 — 뜨는 것은 대개 발목 가동성의 한계이고,
+        // 그 깊이에서 붙이려 하면 허리가 말린다. 깊이를 줄이는 것이 먼저다.
+        FormWarning.HEEL_RISE ->
+            "${when_.ifEmpty { "내려갈 때 " }}발뒤꿈치가 바닥에서 떠요. " +
+                "뒤꿈치가 붙어 있는 깊이까지만 앉아 보세요. 발목이 뻣뻣하면 그 깊이가 " +
+                "지금의 정상 범위예요."
+
         FormWarning.SHALLOW_DEPTH ->
             "조금 더 깊게 앉아 주세요. 엉덩이가 무릎 높이까지 내려오면 딱 좋아요."
 
@@ -234,14 +241,19 @@ private fun List<NotJudged>.sentence(): String {
         .map { FeedbackLabels.topic(it.warning) }
         .distinct()
 
+    // 조사는 마지막 항목의 종성에 따라 갈린다. 박아두면 항목이 늘 때마다 "앉은 깊이은"
+    // 같은 말이 생긴다.
+    fun List<String>.listed(): String =
+        joinToString(", ") + FeedbackLabels.josa(last(), "은", "는")
+
     return buildString {
         if (byAngle.isNotEmpty()) {
-            append("이번엔 ${byAngle.joinToString(", ")}은 볼 수 없었어요. ")
+            append("이번엔 ${byAngle.listed()} 볼 수 없었어요. ")
             append("카메라 방향 때문이라, 다음엔 다른 방향에서도 한 세트 찍어보시면 같이 봐드릴게요.")
         }
         if (notCaught.isNotEmpty()) {
             if (isNotEmpty()) append(" ")
-            append("${notCaught.joinToString(", ")}은 몸이 잘 안 잡혀서 확인하지 못했어요.")
+            append("${notCaught.listed()} 몸이 잘 안 잡혀서 확인하지 못했어요.")
         }
     }
 }

@@ -256,9 +256,9 @@ class CaptureRecorder(
             maxDepthRatio = repFrames.mapNotNull { it.features.depthRatio }.maxOrNull(),
             minThighAngle = repFrames.mapNotNull { it.features.thighAngle }.minOrNull(),
             maxTrunkLean = repFrames.mapNotNull { it.features.trunkLean }.maxOrNull(),
-            maxHeelRise = repFrames.mapNotNull {
-                listOfNotNull(it.features.leftHeelRise, it.features.rightHeelRise).maxOrNull()
-            }.maxOrNull(),
+            // 활성측 값을 쓴다 — 앱이 판정하는 값과 같아야 오프라인 분석으로 임계값을
+            // 다시 놓을 수 있다. 좌우 원값은 frames.csv에 그대로 남는다.
+            maxHeelRise = repFrames.mapNotNull { it.features.heelRise }.maxOrNull(),
             maxLeftMedialKnee = repFrames.mapNotNull {
                 it.features.leftMedialKneeDisplacement
             }.maxOrNull(),

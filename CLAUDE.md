@@ -15,11 +15,12 @@
 - **추론 모델**: `app/src/main/assets/`에 두 개. **기본은 RTMPose-s Halpe26(26 keypoint)**이고 MoveNet Lightning(17 keypoint, COCO)은 비교용으로만 남아 있습니다. MoveNet에는 발 키포인트가 없어 뒤꿈치 들림·발끝 정렬을 아예 계산할 수 없습니다 — **새 판정을 추가할 때 MoveNet 경로를 가정하지 마세요.**
 - **화면**: Exercise(사용자용 운동), WorkoutLab(개발·검증용 운동), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·업로드 대기 배지) 완성. Splash·Home 있음
 - **결과 화면도 짝입니다**: `SessionSummary(sessionId, diagnostics)` — 개발용 운동에서 끝내면 성능 카드가 켜지고, 사용자용에서는 꺼집니다. 화면 전체가 하나의 `LazyColumn`이고 "홈으로" 버튼만 스크롤 밖에 고정입니다 — **고정 높이 카드를 쌓지 마세요**, 피드백이 길어지면 해상도에 따라 버튼이 잘립니다
+- **카운팅은 기준 자세를 다 잰 뒤에만 돌아갑니다** (`WorkoutUiState.countingEnabled`). 걸어가며 자리를 잡는 동안 유령 rep이 세어지던 문제 때문입니다 — 이전 설계(기준선 없이도 카운팅)를 뒤집은 것입니다. **막는 대신 왜 안 세는지 숫자 바로 아래에 알립니다.** 각도를 바꾸면 기준선이 무효가 되어 카운팅도 멈춥니다
 - **운동 화면이 두 벌입니다**: `ExerciseScreen`(사용자용)과 `WorkoutScreen`(개발용)이 **`WorkoutViewModel` 하나를 공유**합니다 — 동작은 같고 표시만 다릅니다. 개발 화면에는 관절 각도·정규화 원값·추론 지연·모델 전환이 올라가 있고, 새 판정을 추가할 때 기기에서 확인하는 자리입니다. **판정 로직을 화면에 넣지 마세요** — 넣으면 두 화면이 다른 답을 냅니다. 공용 UI는 `WorkoutControls.kt`
 - **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
 - **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "내려갈 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. **구간(내려갈 때/가장 낮은 지점/올라올 때)을 함께 말한다** — 두 방향이 다른 구간에 나면 각각 그 구간으로 보고한다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
 - **사용자 문구**: `rep`·`패럴렐`·`valgus` 같은 용어와 임계값 숫자를 화면에 쓰지 않습니다. 용어 매핑은 `FeedbackLabels` 한 곳에 있고 세 화면이 공유합니다 (설계문서 5.2절). **새 문구를 넣을 때 enum 이름이 그대로 나가지 않는지 확인하세요** — `SIDE`·`SHALLOW`가 화면에 찍히고 있었습니다
-- **판정 5종**: 깊이 부족·상체 숙임(측면) / 무릎 valgus·flared·골반 쏠림(정면). `CameraAngle.supportedChecks`가 각도별로 켜고 끕니다
+- **판정 6종**: 깊이 부족·상체 숙임·**뒤꿈치 들림**(측면) / 무릎 valgus·flared·골반 쏠림(정면). `CameraAngle.supportedChecks`가 각도별로 켜고 끕니다. **뒤꿈치가 뜨면 깊이 부족 경고를 내지 않습니다** — 올바른 깊이는 "뒤꿈치가 뜨지 않는 범위까지"라서, 둘이 함께 뜨면 서로 반대인 지시가 됩니다. 뒤꿈치는 `발 길이/정강이 ≥ 0.45` 게이트를 통과한 세션에서만 판정하며(실측 측면 3세션 중 1개 탈락), **활성측 하나만** 봅니다
 - **준비 자세 점검 5종**: `ReadyPosture`가 기준 자세 측정 창에서 서 있는 방향·무릎 펴기·발 간격·발끝 방향·좌우 균형을 본다. **동작 경고(`FormWarning`)와 다른 열거형입니다** — 재는 순간(동작 전/중)과 분모(세션당 1회/rep마다)가 다릅니다. 실시간으로 갱신되고(최근 15프레임), 발 간격은 `발목 간격 / 어깨 너비`로 기준점이 1.0입니다. **막지 않습니다** — 준비 자세가 어긋나도 기준선은 유효하게 측정되므로 경고가 아니라 안내입니다. 결과는 **저장하지 않습니다**(허용폭이 잠정값인 상태로 컬럼을 만들면 재계산할 수 없는 판정이 쌓입니다)
 - **분석 도구**: `tools/analysis/`에 `check_sessions.py`(촬영 당일 사용 가능 판정), `reference_range.py`, `variance_split.py`
 
@@ -28,11 +29,11 @@
 - **Supabase 의존성 없음** — 프로젝트도 미생성. 동기화는 Room 이후 작업입니다. URL/anon key는 `local.properties`로 관리하고 커밋 금지
 - **인증 없음** — `user_id`는 nullable로 두고 나중에 마이그레이션으로 채웁니다
 - **세트 개념 없음** — Workout은 rep을 연속으로 셉니다. `workout_sets` 테이블은 `rep_records`가 `set_id`를 참조하는 DDL을 지키려고 세션당 1행으로 둡니다
-- 미판정 항목: 뒤꿈치 들림, 좌우 비대칭, 그 외 계산만 되고 소비자가 없는 특징들 (준비 자세 쪽 발 간격·발끝 방향은 `ReadyPosture`가 소비하게 됐습니다)
+- 미판정 항목: 좌우 비대칭, 그 외 계산만 되고 소비자가 없는 특징들 (준비 자세 쪽 발 간격·발끝 방향은 `ReadyPosture`, 뒤꿈치 들림은 `FormWarning.HEEL_RISE`가 소비하게 됐습니다)
 
 ### 임계값 상태 (`SquatThresholds.kt`의 `ORIGINS`가 정본)
 
-`FormThresholds`는 `DATA_DERIVED` 5개 · `DEFINITION` 3개 · `PROVISIONAL` 3개, `ReadyThresholds`는 `DATA_DERIVED` 1개 · `PROVISIONAL` 3개, 그리고 카운팅 임계값 7개는 전부 `PROVISIONAL`입니다.
+`FormThresholds`는 `DATA_DERIVED` 6개 · `DEFINITION` 3개 · `PROVISIONAL` 4개, `ReadyThresholds`는 `DATA_DERIVED` 1개 · `PROVISIONAL` 3개, 그리고 카운팅 임계값 7개는 전부 `PROVISIONAL`입니다.
 **새 판정을 추가하기 전에 `ThresholdOrigin`을 반드시 정하세요.** 근거 없는 숫자를 `PROVISIONAL` 표시 없이 넣으면 나중에 아무도 되돌릴 수 없습니다.
 
 깊이 판정은 무릎 각도를 **쓰지 않습니다**. 기준선이 있으면 다리 길이로, 없으면 정강이 길이로 정규화한 엉덩이 높이를 씁니다(`depthLevelByRatio` / `depthLevelByShinDepth`). 각도 경로는 실측에서 깊이 부족을 한 번도 잡지 못해 제거했습니다.
@@ -48,9 +49,9 @@
 ## 지금 해야 할 것
 
 1. **Supabase + WorkManager 동기화** — Room이 1차 저장소로 동작하고 있고 모든 행이 `sync_status = PENDING`으로 쌓입니다. URL/anon key는 `local.properties`로 관리하고 커밋 금지
-2. **의도적 오류 세션 촬영** — 확정된 임계값 전부가 "오류를 잡는가" 미검증입니다. 측면 `TRUNK_LEAN`·`SHALLOW`·`HEEL_RISE`, 정면 편측 valgus. 사람마다 세션 2개. **준비 자세 쪽도 같습니다** — 좁게/넓게 선 세션과 발끝 안쪽 세션이 없어 `ReadyThresholds.stanceNarrowLimit`·`stanceWideLimit`이 `PROVISIONAL`로 남아 있습니다
+2. **의도적 오류 세션 촬영** — 확정된 임계값 전부가 "오류를 잡는가" 미검증입니다. 측면 `TRUNK_LEAN`·`SHALLOW`·`HEEL_RISE`, 정면 편측 valgus. 사람마다 세션 2개. **측면 정상 세션도 더 필요합니다** — 뒤꿈치 임계값이 게이트를 통과한 2명으로만 정해졌습니다. **준비 자세 쪽도 같습니다** — 좁게/넓게 선 세션과 발끝 안쪽 세션이 없어 `ReadyThresholds.stanceNarrowLimit`·`stanceWideLimit`이 `PROVISIONAL`로 남아 있습니다
 3. **Supabase + WorkManager 동기화** — Room 이후
-4. 미판정 항목: 뒤꿈치 들림(분모·기준선을 먼저 고쳐야 함), 좌우 비대칭(현 신호로는 기존 판정과 100% 중복), 정면·측면을 한 세션에서 보는 구조
+4. 미판정 항목: 좌우 비대칭(현 신호로는 기존 판정과 100% 중복), 정면·측면을 한 세션에서 보는 구조
 
 ## 핵심 설계 원칙 (요약 — 상세는 반드시 설계문서 참조)
 

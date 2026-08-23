@@ -29,6 +29,7 @@ object FeedbackLabels {
 
     /** 짧은 이름. rep 목록·기록 목록처럼 좁은 자리에 쓴다. */
     fun shortName(warning: FormWarning): String = when (warning) {
+        FormWarning.HEEL_RISE -> "뒤꿈치 들림"
         FormWarning.SHALLOW_DEPTH -> "덜 앉음"
         FormWarning.EXCESSIVE_LEAN -> "상체 숙임"
         FormWarning.HIP_SHIFT -> "좌우 쏠림"
@@ -54,6 +55,10 @@ object FeedbackLabels {
      */
     fun cue(warning: FormWarning, side: Side? = null): String {
         val body = when (warning) {
+            // "뒤꿈치를 붙이세요"가 아니라 내려가지 말라고 말한다 — 뒤꿈치가 뜨는 것은
+            // 대개 발목 가동성의 한계여서, 그 깊이에서 억지로 붙이려 하면 허리가 말린다.
+            // 행동을 앞에 두고 이유를 뒤에 붙인다.
+            FormWarning.HEEL_RISE -> "뒤꿈치가 뜨니 덜 앉으세요"
             FormWarning.SHALLOW_DEPTH -> "더 깊게 앉으세요"
             FormWarning.EXCESSIVE_LEAN -> "상체를 세우세요"
             // 쏠림은 밀어 올리는 순간에 드러난다 — "서세요"보다 "일어서세요"가 그
@@ -76,6 +81,9 @@ object FeedbackLabels {
      * "벌어지는 것"은 별개 항목이 아니라 같은 것의 반대 방향이다.
      */
     fun topic(warning: FormWarning): String = when (warning) {
+        // 항목 이름은 중립적으로 둔다 — "들림"은 이미 문제를 가리키는 말이라
+        // "못 봤어요"와 붙으면 무엇을 못 봤는지 흐려진다.
+        FormWarning.HEEL_RISE -> "뒤꿈치"
         FormWarning.SHALLOW_DEPTH -> "앉은 깊이"
         FormWarning.EXCESSIVE_LEAN -> "상체 각도"
         FormWarning.HIP_SHIFT -> "좌우 균형"
@@ -111,6 +119,22 @@ object FeedbackLabels {
 
     fun depth(raw: String): String =
         runCatching { depth(DepthLevel.valueOf(raw)) }.getOrDefault(raw)
+
+    /**
+     * 앞말의 종성에 따라 조사를 고른다.
+     *
+     * 항목 이름이 늘어날 때마다 "앉은 깊이은"·"뒤꿈치은" 같은 말이 생긴다. 문구에 조사를
+     * 박아두면 이름을 추가하는 사람이 그 사실을 알 수 없다.
+     *
+     * 한글 음절은 `0xAC00`부터 28개 종성 단위로 배열되므로, 그 나머지가 0이면 종성이 없다.
+     * 한글이 아닌 글자로 끝나면(영문·숫자) 종성 있는 쪽을 쓴다 — 이 앱의 항목 이름은
+     * 전부 한글이라 실제로 걸리지 않지만, 조용히 틀리는 것보다 낫다.
+     */
+    fun josa(word: String, withFinal: String, withoutFinal: String): String {
+        val last = word.lastOrNull() ?: return withFinal
+        if (last !in '가'..'힣') return withFinal
+        return if ((last - '가') % 28 == 0) withoutFinal else withFinal
+    }
 
     // ── 준비 자세 ───────────────────────────────────────────
 

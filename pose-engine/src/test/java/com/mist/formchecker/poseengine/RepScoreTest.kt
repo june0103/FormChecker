@@ -27,11 +27,15 @@ class RepScoreTest {
      * 항목이 바뀔 때 한쪽만 고치는 실수가 생긴다.
      */
     @Test
-    fun `측면은 깊이와 상체 숙임을 판정한다`() {
+    fun `측면은 깊이와 상체 숙임과 뒤꿈치를 판정한다`() {
         val checks = RepScorer.checksFor(CameraAngle.SIDE)
 
         assertEquals(
-            setOf(FormWarning.SHALLOW_DEPTH, FormWarning.EXCESSIVE_LEAN),
+            setOf(
+                FormWarning.SHALLOW_DEPTH,
+                FormWarning.EXCESSIVE_LEAN,
+                FormWarning.HEEL_RISE,
+            ),
             checks,
         )
     }
@@ -71,7 +75,7 @@ class RepScoreTest {
             thresholds = thresholds,
         )
 
-        assertEquals("측면은 깊이·상체 두 항목", 2, score.checkedCount)
+        assertEquals("측면은 깊이·상체·뒤꿈치 세 항목", 3, score.checkedCount)
         assertEquals(1, score.warnedCount)
         assertEquals(false, score.clean)
     }
@@ -218,6 +222,6 @@ class RepScoreTest {
         )
 
         assertNull(noDepth.depthScore)
-        assertEquals("깊이를 못 재도 상체 숙임은 판정한다", 2, noDepth.checkedCount)
+        assertEquals("깊이를 못 재도 상체 숙임·뒤꿈치는 판정한다", 3, noDepth.checkedCount)
     }
 }

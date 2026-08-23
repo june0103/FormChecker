@@ -296,6 +296,16 @@ private fun HudTopBand(
             )
         }
 
+        if (!state.countingEnabled) {
+            Text(
+                // 개발 화면에서도 같은 게이트가 걸린다. 상태머신이 IDLE에 머무는 이유를
+                // 못 보면 카운팅 버그로 오인한다.
+                text = "카운팅 중지 — 기준 자세 미측정",
+                style = MaterialTheme.typography.titleMedium,
+                color = FeedbackWarning,
+            )
+        }
+
         Text(
             text = buildString {
                 append(state.repState.label())
@@ -373,6 +383,10 @@ private fun HudBottomBand(
             // 패럴렐이 0이라는 정의를 눈으로 확인할 수 있게 원값도 보여준다.
             form?.depthRatio?.let { add("깊이비 ${it.formatRatio()}") }
             form?.torsoLeanDegrees?.let { add("상체 ${it.format()}°") }
+            // 게이트가 닫히면 판정이 없는데, 값이 없는 것과 구분되지 않는다. 그래서
+            // 발 가시성 비율을 함께 띄운다 — 낮으면 그게 판정이 없는 이유다.
+            form?.heelRise?.let { add("뒤꿈치 ${it.formatRatio()}") }
+            state.features?.footTibiaRatio?.let { add("발/정강이 ${it.formatRatio()}") }
             // 판정이 아니라 측정값이다. 무릎 정렬 판정은 rep 단위이므로 상단에 있다.
             if (state.cameraAngle.supports(FormCheck.KNEE_ALIGNMENT)) {
                 form?.kneeSpreadRatio?.let { add("무릎폭비 ${it.formatRatio()}") }

@@ -52,9 +52,43 @@ data class FrameFeatures(
     val hipDropRatio: Float?,
     /** 엉덩이 전후 이동량 `(hip.x − 기립 hip.x) / legLength`. 부호 있음. */
     val hipTravelRatio: Float?,
-    /** 뒤꿈치 들림 `(기립 heel.y − heel.y) / footLength`. 양수면 들림. 좌/우. */
+    /**
+     * 뒤꿈치 들림 `((발끝.y − 뒤꿈치.y) − 기립 같은 값) / tibiaLength`. **양수면 들림**. 좌/우.
+     *
+     * ## 분자·분모를 둘 다 바꿨다 (`기술선택_기록.md` 47번 → 59번)
+     * 이전 식은 `(기립 heel.y − heel.y) / footLength`였고 두 곳이 틀렸다.
+     *
+     * 1. **절대 기준선.** 기립 뒤꿈치 y와 비교하므로 몸이 프레임 안에서 위아래로 움직이면
+     *    그만큼 들린 것으로 읽힌다. 실측 3세션에서 캘리브레이션 `standingHeelY`가 그 세션
+     *    READY 중앙값과 최대 0.036 어긋났고, 그 세션이 −0.547이라는 불가능한 값을 냈다.
+     *    → **같은 프레임 안의 발끝과 비교한다.** 발끝은 스쿼트 중 바닥에 고정돼 있어야 하므로
+     *    지면 기준점이고, 몸의 상하 이동은 두 점에서 함께 상쇄된다.
+     * 2. **분모 `footLength`.** 발은 측면에서도 발끝이 앞을 향해 단축되고, 그 정도가 카메라
+     *    높이에 따라 달라진다. 실측 세 사람의 `발/정강이`가 0.589 / 0.561 / **0.413**이었다.
+     *    → **정강이 길이로 나눈다.** 측면에서 정강이는 화면 평면에 놓여 안정적이다.
+     *
+     * 두 수정으로 가장 나쁜 세션의 rep 최대가 **+0.323 → +0.144**로 내려갔고, 나머지 두
+     * 세션은 +0.089 / +0.081에 모였다.
+     *
+     * ## 값이 나와도 못 쓸 수 있다
+     * 발이 짧게 보인 세션은 여전히 2배 시끄럽다([StandingCalibration.footTibiaRatio]).
+     * 게이트는 판정하는 쪽이 건다([SquatFormAnalyzer]) — 여기서는 재고, 쓸지는 판정이
+     * 정한다. 무릎–발끝 정렬의 발목 간격 게이트와 같은 구조다.
+     */
     val leftHeelRise: Float?,
     val rightHeelRise: Float?,
+    /**
+     * 판정에 쓰는 뒤꿈치 들림 — **활성측 하나**다. 좌우 값은 수집용으로만 남긴다.
+     *
+     * ## 왜 좌우 최댓값을 쓰지 않는가
+     * 측면에서 먼 쪽 발은 몸에 가려져 추정값이다. 최댓값을 쓰면 그 추정이 조금만 튀어도
+     * 경고가 난다 — 다른 측면 특징을 모두 활성측 하나로 고정한 것과 같은 이유다
+     * ([hipReference] 주석 참고).
+     *
+     * 임계값도 활성측 값으로 뽑았다([FormThresholds.heelRiseLimit]). 판정이 다른 값을 보면
+     * 그 근거가 그대로 무효가 된다.
+     */
+    val heelRise: Float?,
 
     // ── 정면 특징 (문서 §10) ────────────────────────────────
     /** 스탠스 너비 `발목 간격 / hipWidth`. */
@@ -107,6 +141,13 @@ data class FrameFeatures(
      * `kneeToeDeviation`이 최대 7.761(허용폭은 0.10)을 냈다.
      */
     val ankleSpread: Float?,
+    /**
+     * 발이 얼마나 온전히 보이나 — `발 길이 ÷ 정강이 길이`. 기준선이 없으면 null.
+     *
+     * [ankleSpread]와 같은 이유로 노출한다 — 값 자체가 판정 대상은 아니지만, 이게 낮으면
+     * 뒤꿈치 들림이 물리적으로 불가능한 값을 내는데 이걸 볼 수 없으면 원인을 찾을 수 없다.
+     */
+    val footTibiaRatio: Float?,
     /** 골반 기울기(도). 좌우 힙을 잇는 선과 수평축의 각. */
     val pelvisTilt: Float?,
     /** 어깨 기울기(도). */
@@ -272,13 +313,24 @@ data class FrameFeatures(
                 null
             }
 
+            /**
+             * 뒤꿈치 들림. 지면 기준점은 **같은 프레임의 발끝**이다.
+             *
+             * y는 아래로 증가하므로 뒤꿈치가 들리면 `발끝.y − 뒤꿈치.y`가 커진다. 기립
+             * 시점의 같은 값을 빼서 사람·신발마다 다른 오프셋을 지우고, 정강이로 나눠
+             * 카메라 거리를 지운다.
+             */
             fun heelRise(side: Side): Float? {
-                if (!view.isSide || footLength <= Geometry.EPSILON) return null
+                if (!view.isSide) return null
+                if (calibration == null) return null
+                val tibia = calibration.tibiaLength
+                if (tibia <= Geometry.EPSILON) return null
+                val standing = calibration.standingHeelLift(side) ?: return null
                 val heel = Geometry.heel(side)
                 if (!ok(heel)) return null
-                // y는 아래로 증가하므로 들리면 y가 작아진다.
-                if (calibration == null) return null
-                return (calibration.standingHeelY - pose[heel].y) / footLength
+                val toe = Geometry.toeCenter(pose, side, aspectRatio, minConfidence)
+                    ?: return null
+                return ((toe.second - pose[heel].y) - standing) / tibia
             }
 
             // ── 정면 ────────────────────────────────────────
@@ -428,6 +480,7 @@ data class FrameFeatures(
                 hipTravelRatio = hipTravelRatio,
                 leftHeelRise = heelRise(Side.LEFT),
                 rightHeelRise = heelRise(Side.RIGHT),
+                heelRise = activeSide?.let { heelRise(it) },
                 stanceWidthRatio = stanceWidthRatio,
                 leftMedialKneeDisplacement = medialKnee(Side.LEFT),
                 rightMedialKneeDisplacement = medialKnee(Side.RIGHT),
@@ -436,6 +489,7 @@ data class FrameFeatures(
                 shinDepthRatio = shinDepthRatio,
                 hipShiftRatio = hipShiftRatio,
                 ankleSpread = ankleSpread,
+                footTibiaRatio = calibration?.footTibiaRatio,
                 pelvisTilt = pelvisTilt,
                 shoulderTilt = shoulderTilt,
                 trunkLateralLean = trunkLateralLean,

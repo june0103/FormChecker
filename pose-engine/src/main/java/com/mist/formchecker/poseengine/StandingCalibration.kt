@@ -44,8 +44,34 @@ data class StandingCalibration(
     val standingAnkleAngle: Float,
     /** 기립 골반 높이(정규화 y). 하강량의 기준선. */
     val standingHipY: Float,
-    /** 기립 뒤꿈치 높이(정규화 y). 뒤꿈치 들림의 기준선. */
+    /**
+     * 기립 뒤꿈치 높이(정규화 y).
+     *
+     * ## ⚠ 뒤꿈치 들림의 기준선이 **아니다** (더는)
+     * 이 절대 y를 기준선으로 쓰면 사람이 프레임 안에서 조금 위아래로 움직이거나 캘리브레이션
+     * 창이 그 사람의 기립을 못 잡았을 때 통째로 어긋난다. 실측 3세션에서 이 값과 그 세션의
+     * READY 중앙값 차이가 −0.0038 / **−0.0362** / −0.0084였고, 0.036 어긋난 세션이 물리적으로
+     * 불가능한 뒤꿈치 값을 냈다(`기술선택_기록.md` 47번).
+     *
+     * 지금 기준선은 [standingHeelLift]다 — 같은 프레임 안의 발끝과 비교하므로 몸이 위아래로
+     * 움직여도 상쇄된다. 이 필드는 **수집 데이터에 남기는 측정값**으로만 유지한다.
+     */
     val standingHeelY: Float,
+    /**
+     * 기립 `발끝 y − 뒤꿈치 y`. 좌/우 각각. 발이 안 보인 쪽은 null.
+     *
+     * ## 뒤꿈치 들림의 기준선이다
+     * 화면 y는 아래로 증가하므로, 발이 바닥에 붙어 있으면 뒤꿈치와 발끝이 거의 같은 높이라
+     * 이 값이 0 근처다. 다만 **0이 되지는 않는다** — 뒤꿈치 키포인트는 신발 뒤축에, 발끝은
+     * 바닥에 가깝게 찍히고 그 차이가 사람·신발마다 다르다. 그래서 절대값이 아니라 **이 값
+     * 대비 변화량**으로 잰다([FrameFeatures.heelRise]).
+     *
+     * ## 왜 좌우를 따로 두는가
+     * 측면 촬영에서 먼 쪽 발은 가려져 신뢰할 수 없다. 좌우를 평균하면 가려진 쪽 추정이
+     * 기준선에 섞인다 — [standingHeelY]가 좌우 평균이어서 겪은 문제와 같은 종류다.
+     */
+    val standingLeftHeelLift: Float?,
+    val standingRightHeelLift: Float?,
     /** 평균한 프레임 수. */
     val framesUsed: Int,
     /**
@@ -58,6 +84,36 @@ data class StandingCalibration(
 ) {
     /** 다리 전체 길이. 대부분의 변위 특징의 분모다. */
     val legLength: Float get() = femurLength + tibiaLength
+
+    /** 그 쪽 기립 뒤꿈치-발끝 높이차. 안 보였으면 null. */
+    fun standingHeelLift(side: Side): Float? =
+        if (side == Side.LEFT) standingLeftHeelLift else standingRightHeelLift
+
+    /**
+     * 발이 얼마나 온전히 보이나 — `발 길이 ÷ 정강이 길이`.
+     *
+     * ## 왜 정강이로 나누는가
+     * 발 길이 자체는 카메라 거리에 따라 달라지므로 절대값으로는 "잘 보인다"를 판단할 수
+     * 없다. 정강이는 측면에서 화면 평면에 놓여 안정적으로 측정되므로 좋은 분모다.
+     *
+     * ## 무엇을 걸러내는가
+     * 뒤꿈치 들림은 **발끝을 지면 기준점으로 쓴다.** 발이 짧게 보이면 발끝과 뒤꿈치가
+     * 화면에서 가까워져 둘의 높이차가 키포인트 노이즈와 구분되지 않는다. 실측 측면 3세션:
+     *
+     * | 사람 | 발/정강이 | 발끝 confidence p50 | rep 최대 뒤꿈치값 |
+     * |---|---|---|---|
+     * | P001 | 0.589 | 0.716 | +0.089 |
+     * | P008 | 0.561 | 0.728 | +0.081 |
+     * | **P007** | **0.413** | **0.520** | **+0.144** |
+     *
+     * 발이 짧게 보인 세션이 정확히 값이 시끄러운 세션이다. [FormThresholds.minHeelFootRatio]가
+     * 이 값으로 판정 여부를 가른다.
+     */
+    val footTibiaRatio: Float get() = if (tibiaLength > Geometry.EPSILON) {
+        footLength / tibiaLength
+    } else {
+        0f
+    }
 
     /**
      * 대퇴/정강이 비율.
@@ -112,6 +168,10 @@ data class StandingCalibration(
                 standingAnkleAngle = samples.avg { it.ankleAngle },
                 standingHipY = samples.avg { it.hipY },
                 standingHeelY = samples.avg { it.heelY },
+                // 발이 보인 프레임만 쓴다. 좌우를 따로 두어 가려진 쪽이 기준선에
+                // 섞이지 않게 한다.
+                standingLeftHeelLift = samples.avgOrNull { it.leftHeelLift },
+                standingRightHeelLift = samples.avgOrNull { it.rightHeelLift },
                 framesUsed = samples.size,
                 jitter = jitterOf(samples),
             )
@@ -165,6 +225,8 @@ data class StandingCalibration(
             val ankleAngle: Float,
             val hipY: Float,
             val heelY: Float,
+            val leftHeelLift: Float?,
+            val rightHeelLift: Float?,
         )
 
         private fun measure(pose: Pose, aspect: Float, minConfidence: Float): Sample {
@@ -198,6 +260,18 @@ data class StandingCalibration(
                 .filter { pose.isReliable(it, minConfidence) }
                 .map { pose[it].y }
 
+            /**
+             * `발끝 y − 뒤꿈치 y`. 발이 바닥에 붙어 있으면 0 근처다.
+             *
+             * y는 보정하지 않는다 — 종횡비는 x에만 곱하므로 세로 거리는 그대로다.
+             */
+            fun heelLift(side: Side): Float? {
+                val heel = Geometry.heel(side)
+                if (!pose.isReliable(heel, minConfidence)) return null
+                val toe = Geometry.toeCenter(pose, side, aspect, minConfidence) ?: return null
+                return toe.second - pose[heel].y
+            }
+
             return Sample(
                 femur = (leftFemur + rightFemur) / 2f,
                 tibia = (leftTibia + rightTibia) / 2f,
@@ -213,6 +287,8 @@ data class StandingCalibration(
                 ankleAngle = if (ankleAngles.isEmpty()) 0f else ankleAngles.average().toFloat(),
                 hipY = hipCenter.second,
                 heelY = if (heels.isEmpty()) 0f else heels.average().toFloat(),
+                leftHeelLift = heelLift(Side.LEFT),
+                rightHeelLift = heelLift(Side.RIGHT),
             )
         }
 
@@ -236,6 +312,16 @@ data class StandingCalibration(
 
         private inline fun List<Sample>.avg(select: (Sample) -> Float): Float =
             map(select).average().toFloat()
+
+        /**
+         * 값이 있는 프레임만 평균한다. 하나도 없으면 null이다.
+         *
+         * 0으로 채우지 않는다 — 뒤꿈치 기준선에서 0은 "발이 완전히 평평하다"는 뜻이라
+         * "못 봤다"와 구분되지 않는다. 못 본 것을 평평했다고 말하면 이후 모든 프레임이
+         * 그만큼 들린 것으로 계산된다.
+         */
+        private inline fun List<Sample>.avgOrNull(select: (Sample) -> Float?): Float? =
+            mapNotNull(select).takeIf { it.isNotEmpty() }?.average()?.toFloat()
 
         /** 문서 §8.1의 하한. 이 값 이상이면 특징 계산에 쓴다. */
         const val MIN_CONFIDENCE = 0.5f

@@ -124,7 +124,11 @@ class SessionReportTest {
             .toSet()
 
         assertEquals(
-            setOf(FormWarning.SHALLOW_DEPTH, FormWarning.EXCESSIVE_LEAN),
+            setOf(
+                FormWarning.SHALLOW_DEPTH,
+                FormWarning.EXCESSIVE_LEAN,
+                FormWarning.HEEL_RISE,
+            ),
             byAngle,
         )
         assertTrue("정면 항목은 못 본 목록에 없다", report.notJudged.none {
