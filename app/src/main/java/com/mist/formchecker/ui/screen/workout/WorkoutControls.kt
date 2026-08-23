@@ -24,7 +24,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,7 @@ import com.mist.formchecker.poseengine.DepthBasis
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.HeldWarning
 import com.mist.formchecker.poseengine.KneeAlignment
 import com.mist.formchecker.poseengine.PoseVisibility
 import com.mist.formchecker.poseengine.ReadyPosture
@@ -224,10 +227,11 @@ internal fun AngleMismatchNotice(
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         // 색만으로 상태를 전달하지 않는다 (디자인시스템 34행 — 색각 이상 고려).
-        Text("ⓘ", color = FeedbackInfo, style = MaterialTheme.typography.bodyLarge)
+        Text("ⓘ", color = FeedbackInfo, style = MaterialTheme.typography.titleLarge)
         Text(
+            // 각도가 어긋나면 판정 항목이 통째로 바뀐다. 떨어져 선 자리에서 알아야 한다.
             text = "$name 으로 서 계신 것 같습니다",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.titleMedium,
             color = FeedbackInfo,
             modifier = Modifier.weight(1f),
         )
@@ -241,14 +245,16 @@ internal fun AngleMismatchNotice(
 }
 
 /**
- * @param side 무릎 경고에 붙일 쪽(사람 기준). "무릎을 벌려주세요"보다 "왼쪽 무릎을
- *   벌려주세요"가 실행 가능한 지시다. 무릎 경고가 아니면 무시한다 — 깊이·상체·골반은
- *   양쪽을 함께 보는 판정이라 쪽이 없다.
+ * 자세 피드백 한 줄.
+ *
+ * [HeldWarning]을 받는다 — 프레임 단위 경고를 그대로 그리면 자세를 유지하지 않는 순간
+ * 사라져서, 사용자가 다 올라와 화면을 볼 때는 이미 없다. 무엇을 얼마나 붙잡아 두는지는
+ * [com.mist.formchecker.poseengine.FeedbackHold]가 정한다 — 두 운동 화면이 같은 시점에
+ * 같은 것을 봐야 하므로 화면에서 정하지 않는다.
  */
 @Composable
 internal fun FormWarningRow(
-    warning: FormWarning,
-    side: Side? = null,
+    held: HeldWarning,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -261,10 +267,13 @@ internal fun FormWarningRow(
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         // 디자인시스템 34행: 경고는 색과 아이콘을 함께 쓴다.
-        Text("!", color = FeedbackWarning, style = MaterialTheme.typography.labelLarge)
+        Text("!", color = FeedbackWarning, style = MaterialTheme.typography.titleLarge)
         Text(
-            text = warning.messageWith(side),
-            style = MaterialTheme.typography.bodyMedium,
+            // 자세 피드백은 **떨어져 선 자리에서 읽어야 하는 유일한 본문**이다. 접을 수도
+            // 없고(누르러 오는 동안 rep이 지나간다) 작을 수도 없다. 그래서 길이도
+            // 리포트 문장이 아니라 흘깃 볼 수 있는 지시로 줄인다.
+            text = FeedbackLabels.cue(held),
+            style = MaterialTheme.typography.titleMedium,
             color = FeedbackWarning,
         )
     }
@@ -280,6 +289,10 @@ internal fun FormWarningRow(
  *
  * 그래서 여기서는 기준선이 **없으면 무엇을 못 하는지**만 알린다. 문서 §2.3이 카운팅과
  * 자세 평가를 분리한 것과 같은 이유다.
+ *
+ * @param collapseDetails 설명·수치를 [InfoNote] 뒤로 접는다. 사용자용 화면에서 켠다 —
+ *   실기기를 세워두고 전신이 들어올 만큼 떨어져 서면 **횟수 말고는 글씨가 읽히지 않는다.**
+ *   거기서 읽어야 하는 것과 기기 앞에서 읽는 것을 갈라야 한다([InfoNote] 참고).
  */
 @Composable
 internal fun CalibrationBar(
@@ -288,7 +301,13 @@ internal fun CalibrationBar(
     onCancel: () -> Unit,
     onSelectPrepSeconds: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    collapseDetails: Boolean = false,
 ) {
+    // 접을 것을 **그리기 전에** 확정한다. 그리는 도중에 모으면 아이콘을 목록이 완성된
+    // 뒤(= 바 맨 아래)에만 놓을 수 있고, 그러면 아이콘이 설명하려는 문구와 버튼 두 개
+    // 건너에 떨어진다. 접을 대상은 상태만으로 정해지므로 순수 함수로 낼 수 있다.
+    val notes = if (collapseDetails) collapsedNotes(state) else emptyList()
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
@@ -296,11 +315,18 @@ internal fun CalibrationBar(
         when (state.calibrationStage) {
             CalibrationStage.PREPARING -> {
                 val seconds = (state.calibrationPrepRemainingMs + 999) / 1000
-                Text(
-                    text = "카메라 앞에 서 주세요 — ${seconds}초 후 측정을 시작해요",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
+                InfoNote(notes) {
+                    Text(
+                        // 아이콘이 오른쪽을 차지하므로 20sp 한 줄에 들어갈 길이로 줄인다.
+                        // "후 시작"은 카운트다운이 이미 말하고 있고, 수집 단계의
+                        // "그대로 계세요 — N초"와 형태가 같아져 읽는 규칙이 하나가 된다.
+                        text = "카메라 앞에 서 주세요 — ${seconds}초",
+                        // 이 구간은 사용자가 화면에서 가장 멀리 있을 때다. 여기서 안 읽히면
+                        // 카운트다운이 도는 것도 모른다.
+                        style = MaterialTheme.typography.titleLarge,
+                        color = LimeGreen,
+                    )
+                }
                 Text(
                     // 카운트다운이 끝나기 전에 자기 위치를 고칠 수 있어야 한다.
                     // 이 줄이 없으면 3초를 더 기다린 뒤에야 실패를 알게 된다.
@@ -309,12 +335,13 @@ internal fun CalibrationBar(
                     } else {
                         "아직 전신이 다 안 보여요. 머리부터 발까지 화면에 들어오게 서 주세요."
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    // 접지 않는다 — 떨어져 선 사람이 **지금** 고쳐야 하는 말이다.
+                    style = MaterialTheme.typography.bodyLarge,
                     color = if (state.calibrationSubjectVisible) LimeGreen else FeedbackWarning,
                 )
                 // 카운트다운이 도는 동안 준비 자세를 고칠 수 있어야 한다. 측정이 끝난 뒤에
                 // 알려주면 사용자는 이미 스쿼트를 시작한 뒤다.
-                ReadyPostureRows(state.readyPosture)
+                ReadyPostureRows(state.readyPosture, collapseDetails)
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -323,18 +350,21 @@ internal fun CalibrationBar(
 
             CalibrationStage.COLLECTING -> {
                 val seconds = (state.calibrationRemainingMs + 999) / 1000
-                Text(
-                    text = "그대로 계세요 — ${seconds}초",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
-                Text(
-                    // 다시 채워지는 이유를 알려줘야 사용자가 자세를 고칠 수 있다.
-                    text = "몸이 가려지면 처음부터 다시 세요.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                )
-                ReadyPostureRows(state.readyPosture)
+                InfoNote(notes) {
+                    Text(
+                        text = "그대로 계세요 — ${seconds}초",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = LimeGreen,
+                    )
+                }
+                if (!collapseDetails) {
+                    Text(
+                        text = RESTART_NOTE,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted,
+                    )
+                }
+                ReadyPostureRows(state.readyPosture, collapseDetails)
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -342,25 +372,23 @@ internal fun CalibrationBar(
             }
 
             CalibrationStage.READY -> {
-                val calibration = state.calibration
-                Text(
-                    text = buildString {
-                        append("기준선 확보")
-                        state.activeSide?.let { append(" · ${it.label()} 기준") }
-                        calibration?.let {
-                            append(" · 다리 ${it.legLength.formatRatio()}")
-                            append(" · 대퇴/정강이 ${it.femurTibiaRatio.formatRatio()}")
-                            append(" · 지터 ${"%.4f".format(it.jitter)}")
-                        }
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
+                InfoNote(notes) {
+                    Text(
+                        text = if (collapseDetails) {
+                            "기준 자세를 다 쟀어요"
+                        } else {
+                            listOfNotNull("기준선 확보", baselineNote(state))
+                                .joinToString(" · ")
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = LimeGreen,
+                    )
+                }
                 // 차단하지 않는 문제. 어떤 특징이 빠지는지 알려야 한다.
                 state.calibrationProblems.forEach { CalibrationProblemRow(it) }
                 // 측정이 끝난 뒤에도 남긴다 — 준비 자세가 어긋난 채로 잰 기준선이라는
                 // 사실은 이 세션 내내 유효한 정보다.
-                ReadyPostureRows(state.readyPosture)
+                ReadyPostureRows(state.readyPosture, collapseDetails)
                 OutlinedButton(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -368,17 +396,20 @@ internal fun CalibrationBar(
             }
 
             CalibrationStage.NONE -> {
-                Text(
-                    // 이 문구는 #24 이전 동작을 설명하고 있었다("각도 기준으로 대체").
-                    // 각도 경로는 제거됐고 이제 정강이 길이로 정규화한다 — 기준 자세가
-                    // 없어도 판정은 되고, 다리 길이 대신 매 프레임 정강이를 쓰므로
-                    // 값이 조금 더 흔들린다.
-                    text = "기준 자세를 아직 안 재셨어요. 이대로도 자세는 봐드리지만, " +
-                        "키와 다리 길이를 몰라서 앉은 깊이가 조금 덜 정확할 수 있어요. " +
-                        "3초만 서 계시면 더 정확해져요.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                )
+                InfoNote(notes) {
+                    Text(
+                        text = "기준 자세를 아직 안 재셨어요",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextMuted,
+                    )
+                }
+                if (!collapseDetails) {
+                    Text(
+                        text = WHY_CALIBRATE,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted,
+                    )
+                }
                 state.calibrationProblems.forEach { CalibrationProblemRow(it) }
                 PrepSecondsPicker(
                     selected = state.calibrationPrepSeconds,
@@ -396,6 +427,139 @@ internal fun CalibrationBar(
                         },
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 사용자용 화면에서 ⓘ 뒤로 접을 문구.
+ *
+ * 인라인으로 그리는 쪽과 **같은 문자열 상수**를 쓴다. 두 벌로 적으면 한쪽만 고쳐져
+ * 화면에 따라 다른 설명이 나간다.
+ */
+private fun collapsedNotes(state: WorkoutUiState): List<String> = buildList {
+    when (state.calibrationStage) {
+        // 준비 시간에는 접을 것이 없다 — 이 구간의 문구는 전부 지금 할 일을 바꾼다.
+        CalibrationStage.PREPARING -> Unit
+        CalibrationStage.COLLECTING -> add(RESTART_NOTE)
+        CalibrationStage.READY -> baselineNote(state)?.let(::add)
+        CalibrationStage.NONE -> add(WHY_CALIBRATE)
+    }
+    addAll(readyPostureNotes(state.readyPosture))
+}
+
+/**
+ * 기준선 수치. **사용자가 조치할 수 없는 값**이라 사용자용에서는 접는다.
+ *
+ * 개발 화면에서는 제목 줄에 그대로 붙는다 — 기기 앞에서 기준선이 맞는지 확인하는 값이고,
+ * 그 확인이 이 프로젝트에서 여러 번 잘못된 임계값을 걷어냈다.
+ */
+private fun baselineNote(state: WorkoutUiState): String? {
+    val parts = buildList {
+        state.activeSide?.let { add("${it.label()} 다리 기준") }
+        state.calibration?.let {
+            add("다리 ${it.legLength.formatRatio()}")
+            add("대퇴/정강이 ${it.femurTibiaRatio.formatRatio()}")
+            add("지터 ${"%.4f".format(it.jitter)}")
+        }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
+/** 수집 중 창이 리셋되는 이유. 지금 할 일("그대로 계세요")을 바꾸지는 않는다. */
+private const val RESTART_NOTE = "몸이 가려지면 처음부터 다시 세요."
+
+/**
+ * 기준 자세를 왜 재는지.
+ *
+ * 이 문구는 #24 이전 동작을 설명하고 있었다("각도 기준으로 대체"). 각도 경로는 제거됐고
+ * 이제 정강이 길이로 정규화한다 — 기준 자세가 없어도 판정은 되고, 다리 길이 대신 매 프레임
+ * 정강이를 쓰므로 값이 조금 더 흔들린다.
+ */
+private const val WHY_CALIBRATE =
+    "이대로도 자세는 봐드리지만, 키와 다리 길이를 몰라서 앉은 깊이가 조금 덜 정확할 수 " +
+        "있어요. 3초만 서 계시면 더 정확해져요."
+
+/**
+ * 제목 줄 오른쪽에 안내 아이콘을 붙이고, 누르면 접어둔 문구를 펼친다.
+ *
+ * ## 왜 접는가
+ * 실기기를 세워두고 전신이 들어올 만큼 떨어져 서면 **횟수 말고는 글씨가 읽히지 않는다.**
+ * 그 거리에서 12sp 세 줄 설명은 화면만 차지하고 아무도 읽지 못한다.
+ *
+ * ## 무엇을 접고 무엇을 남기는가
+ * 기준은 **그 거리에서 읽고 바로 몸을 바꿀 수 있는 말인가**다.
+ *
+ * | 남긴다 | 접는다 |
+ * |---|---|
+ * | 자세 피드백, 준비 자세 안내 | 왜 그런지에 대한 설명 |
+ * | 지금 자리가 되는지, 카운트다운 | 체절 길이·지터 같은 수치 |
+ * | 측정 실패 사유 | 못 본 항목 목록 |
+ *
+ * 접는 쪽은 **기기 앞에서 한 번 읽는 말**이다 — 버튼을 누르려면 어차피 기기 앞에 와야
+ * 하므로, 그 자리에서 아이콘을 누르면 된다.
+ *
+ * ## 왜 [header]를 받는가
+ * 아이콘이 **설명하려는 문구 옆에** 있어야 한다. 접은 것들을 모아 바 맨 아래에 두면
+ * 아이콘과 문구 사이에 버튼이 두 개 끼어, 무엇에 대한 안내인지 읽히지 않는다.
+ *
+ * ## 왜 아이콘 하나에 여러 줄을 담는가
+ * 줄마다 아이콘을 붙이면 아이콘이 원래 문구보다 화면을 더 차지한다. 접는 것들은 전부
+ * "지금 안 읽어도 되는 말"이라 하나로 묶어도 의미가 갈리지 않는다.
+ *
+ * @param notes 비어 있으면 아이콘 없이 [header]만 그린다 — 접을 것이 없는데 아이콘이
+ *   있으면 눌러도 아무 일이 없다.
+ */
+@Composable
+internal fun InfoNote(
+    notes: List<String>,
+    modifier: Modifier = Modifier,
+    header: @Composable () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Box(modifier = Modifier.weight(1f)) { header() }
+            if (notes.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClickLabel = if (expanded) "안내 접기" else "안내 보기") {
+                            expanded = !expanded
+                        }
+                        // 접근성 최소 터치 타겟 (디자인시스템 68행). 아이콘 글리프만으로는
+                        // 12sp짜리 과녁이 되어 기기 앞에서도 잘 안 눌린다.
+                        .heightIn(min = TouchTarget.minSize)
+                        .padding(horizontal = Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    // 색만으로 상태를 전달하지 않는다 (디자인시스템 34행).
+                    Text(
+                        text = "ⓘ",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = FeedbackInfo,
+                    )
+                    Text(
+                        text = if (expanded) "접기" else "안내",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = FeedbackInfo,
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            notes.forEach { note ->
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMuted,
+                )
             }
         }
     }
@@ -450,15 +614,20 @@ internal fun PrepSecondsPicker(selected: Int, onSelect: (Int) -> Unit) {
  * ## 왜 판정을 여기서 하지 않는가
  * 두 운동 화면이 이 컴포저블을 공유한다. 화면에 조건을 넣으면 사용자용과 개발용이 다른
  * 답을 내게 된다([ReadyPosture]가 판정을 독점한다).
+ *
+ * @param collapseDetails 못 본 항목을 그리지 않는다. 호출부가 [readyPostureNotes]로 같은
+ *   목록을 받아 [InfoNote]에 넣는다 — 안내 아이콘을 바에 하나만 두기 위해서다.
  */
 @Composable
-internal fun ReadyPostureRows(posture: ReadyPosture) {
+internal fun ReadyPostureRows(posture: ReadyPosture, collapseDetails: Boolean = false) {
     if (posture.framesUsed == 0) return
 
     posture.issues.forEach { issue ->
         Text(
             text = FeedbackLabels.issue(issue),
-            style = MaterialTheme.typography.labelSmall,
+            // 접지 않고 키운다. 준비 자세를 고칠 사람은 화면에서 떨어져 서 있고,
+            // 이 줄을 못 읽으면 무엇을 바꿔야 할지 알 방법이 없다.
+            style = MaterialTheme.typography.titleMedium,
             color = FeedbackWarning,
         )
     }
@@ -467,41 +636,41 @@ internal fun ReadyPostureRows(posture: ReadyPosture) {
             // "좋아요"가 아니라 무엇이 확인됐는지를 쓴다 — 확정된 임계값 전부가 "오류를
             // 잡는가" 미검증이므로, 통과를 자세가 좋다는 뜻으로 말할 수 없다.
             text = "준비 자세에서 볼 수 있는 건 다 괜찮아요.",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodyLarge,
             color = LimeGreen,
         )
     }
-    posture.notJudged.forEach { (check, reason) ->
+    if (collapseDetails) return
+    readyPostureNotes(posture).forEach { note ->
         Text(
-            text = FeedbackLabels.notJudged(check, reason),
+            text = note,
             style = MaterialTheme.typography.labelSmall,
             color = TextMuted,
         )
     }
 }
 
+/**
+ * 준비 자세에서 **못 본 항목**의 문구.
+ *
+ * 컴포저블이 아니라 순수 함수인 이유: 접는 화면에서는 이 목록이 [CalibrationBar]의
+ * [InfoNote]로 올라가야 하는데, 그리는 함수 안에 갇혀 있으면 꺼낼 수 없다.
+ *
+ * 이 목록을 지우지는 않는다. 측면 촬영에서는 세 항목이 통째로 빠지므로, 아무 말도 없으면
+ * 재지도 않은 것을 통과한 것으로 읽는다.
+ */
+internal fun readyPostureNotes(posture: ReadyPosture): List<String> =
+    posture.notJudged.map { (check, reason) -> FeedbackLabels.notJudged(check, reason) }
+
 @Composable
 internal fun CalibrationProblemRow(problem: StandingCalibration.Problem) {
     Text(
         text = problem.message,
-        style = MaterialTheme.typography.labelSmall,
+        // 접지 않는다 — "카메라를 더 가까이 두세요"는 그 자리에서 할 일을 바꾼다.
+        style = MaterialTheme.typography.bodyLarge,
         // 차단 여부로 색을 나눈다. 발 미검출은 진행을 막지 않으므로 경고가 아니다.
         color = if (problem.blocking) FeedbackWarning else TextMuted,
     )
-}
-
-/**
- * 무릎 경고에만 쪽을 붙인다.
- *
- * 사람 기준 좌/우다(화면 기준이 아니다) — 코치가 말하듯 "왼쪽 무릎"이 사용자 자신의
- * 왼쪽을 가리켜야 한다. [FrameFeatures]가 편차를 계산할 때 이미 화면 좌우를 사람 좌우로
- * 뒤집어 두었다.
- */
-internal fun FormWarning.messageWith(side: Side?): String = when {
-    side == null -> message
-    this == FormWarning.KNEE_VALGUS || this == FormWarning.KNEE_FLARED ->
-        "${if (side == Side.LEFT) "왼쪽" else "오른쪽"} $message"
-    else -> message
 }
 
 /**

@@ -180,8 +180,24 @@ data class SquatForm(
     val warnings: List<FormWarning>,
 )
 
-/** 자세 경고. 설계문서 4장 `rep_records.error_flags`에 저장될 항목들이다. */
-enum class FormWarning(val message: String) {
+/**
+ * 자세 경고. 설계문서 4장 `rep_records.error_flags`에 저장될 항목들이다.
+ *
+ * ## 화면 문구는 여기 없다
+ * `FeedbackLabels`가 사용자 문구를 독점한다(설계문서 5.2절). enum이 문자열을 들고 있으면
+ * 리포트·rep 목록·HUD가 같은 것을 다르게 부르기 시작하고, 실제로 그런 적이 있다.
+ *
+ * ## [check]를 붙이는 이유
+ * **한 항목에 방향이 둘인 경우가 있다** — [KNEE_VALGUS]와 [KNEE_FLARED]는 "무릎 방향"
+ * 하나의 반대 방향이다. 화면에 둘을 동시에 띄우면 서로 반대인 지시가 나란히 뜬다
+ * ([FeedbackHold]가 이걸로 항목당 하나만 남긴다).
+ *
+ * 각도별로 어느 경고를 켜는지도 이 값에서 파생시킨다([RepScorer.checksFor]) — 매핑을
+ * 두 곳에 나눠 적으면 항목이 바뀔 때 한쪽만 고치는 실수가 생긴다.
+ *
+ * @property check 이 경고가 속한 판정 항목.
+ */
+enum class FormWarning(val check: FormCheck) {
     /**
      * **rep 단위 판정이므로 [SquatForm.warnings]에는 담기지 않는다.**
      *
@@ -189,7 +205,7 @@ enum class FormWarning(val message: String) {
      * ([FormThresholds.kneeAlignmentOf]). rep이 끝난 뒤 `error_flags`에 기록할 때
      * 이 값을 쓴다.
      */
-    KNEE_VALGUS("무릎을 벌려주세요"),
+    KNEE_VALGUS(FormCheck.KNEE_ALIGNMENT),
 
     /**
      * 무릎이 발끝보다 과도하게 벌어졌다.
@@ -197,9 +213,9 @@ enum class FormWarning(val message: String) {
      * [KNEE_VALGUS]와 달리 프레임 단위로 판정한다 — 무릎–발끝 정렬은 기준점이 0이라
      * 선 자세 기준선이 필요 없다.
      */
-    KNEE_FLARED("무릎을 발끝 방향으로 모아주세요"),
-    SHALLOW_DEPTH("더 깊게 앉아주세요"),
-    EXCESSIVE_LEAN("상체를 세워주세요"),
+    KNEE_FLARED(FormCheck.KNEE_ALIGNMENT),
+    SHALLOW_DEPTH(FormCheck.DEPTH),
+    EXCESSIVE_LEAN(FormCheck.TORSO_LEAN),
 
     /**
      * 골반이 한쪽으로 쏠렸다. 정면 전용.
@@ -207,5 +223,5 @@ enum class FormWarning(val message: String) {
      * 프레임 단위로 판정할 수 있다 — 선 자세 기준선이 필요 없고 발목 간격으로 정규화되므로
      * 체형에 무관하다(사람 간 변동이 사람 내의 1.04배).
      */
-    HIP_SHIFT("체중을 양발에 고르게 실어주세요"),
+    HIP_SHIFT(FormCheck.SYMMETRY),
 }
