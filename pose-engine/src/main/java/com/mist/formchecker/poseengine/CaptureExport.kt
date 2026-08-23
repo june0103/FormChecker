@@ -58,6 +58,11 @@ object CaptureExport {
         calib("standing_ankle_angle") { it.standingAnkleAngle }
         calib("standing_hip_y") { it.standingHipY }
         calib("standing_heel_y") { it.standingHeelY }
+        // 뒤꿈치 들림의 실제 기준선. `standing_heel_y`는 더는 판정에 쓰지 않는다.
+        calib("standing_left_heel_lift") { it.standingLeftHeelLift }
+        calib("standing_right_heel_lift") { it.standingRightHeelLift }
+        // 뒤꿈치 판정 게이트의 입력. 낮으면 뒤꿈치값이 노이즈에 묻힌다.
+        calib("foot_tibia_ratio") { it.footTibiaRatio }
         calib("calibration_frames") { it.framesUsed }
         calib("calibration_jitter") { it.jitter }
 
@@ -103,9 +108,13 @@ object CaptureExport {
         feature("shin_angle") { it.shinAngle }
         feature("hip_drop_ratio") { it.hipDropRatio }
         feature("hip_travel_ratio") { it.hipTravelRatio }
+        // 판정에 쓰는 값(활성측)과 좌우 원값을 함께 낸다 — 임계값을 다시 놓을 때
+        // 판정이 실제로 본 값이 무엇인지 알아야 한다.
+        feature("heel_rise") { it.heelRise }
         feature("left_heel_rise") { it.leftHeelRise }
         feature("right_heel_rise") { it.rightHeelRise }
         feature("stance_width_ratio") { it.stanceWidthRatio }
+        feature("foot_tibia_ratio") { it.footTibiaRatio }
         feature("left_medial_knee") { it.leftMedialKneeDisplacement }
         feature("right_medial_knee") { it.rightMedialKneeDisplacement }
         // 무릎–발끝 정렬. 0이 정답이고 양쪽 다 오류다 — 힙–발목 기준선 방식과 달리

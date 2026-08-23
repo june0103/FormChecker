@@ -23,7 +23,7 @@ enum class CameraAngle {
 
     val supportedChecks: Set<FormCheck>
         get() = when (this) {
-            SIDE -> setOf(FormCheck.DEPTH, FormCheck.TORSO_LEAN)
+            SIDE -> setOf(FormCheck.DEPTH, FormCheck.TORSO_LEAN, FormCheck.HEEL_LIFT)
             FRONT -> setOf(FormCheck.KNEE_ALIGNMENT, FormCheck.SYMMETRY)
         }
 }
@@ -41,6 +41,19 @@ enum class FormCheck {
 
     /** 상체 기울기 — 과도한 전방 숙임. 측면에서만 보인다. */
     TORSO_LEAN,
+
+    /**
+     * 뒤꿈치 들림 — 발뒤꿈치가 바닥에서 떴는가. 측면에서만 보인다.
+     *
+     * 정면에서는 뒤꿈치가 발에 가려 보이지 않고, 보인다 해도 들린 방향(수직)이 화면에서
+     * 발 두께 정도로만 나타난다.
+     *
+     * ## [DEPTH]와 짝이다
+     * 올바른 스쿼트의 깊이는 "뒤꿈치가 뜨지 않는 범위까지"다. 그래서 이 항목이 걸리면
+     * 깊이 부족 경고를 내지 않는다([SquatFormAnalyzer]의 `warningsOf`) — 두 경고가 함께
+     * 뜨면 "뒤꿈치가 떴는데 더 깊게 앉으라"는 서로 반대인 지시가 된다.
+     */
+    HEEL_LIFT,
 
     /** 무릎 정렬 — 무릎이 안으로 말리는가(valgus). 정면에서만 보인다. */
     KNEE_ALIGNMENT,

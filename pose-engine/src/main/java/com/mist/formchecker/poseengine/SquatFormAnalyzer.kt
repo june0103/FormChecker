@@ -78,6 +78,18 @@ class SquatFormAnalyzer(
             null
         }
 
+        // 뒤꿈치 들림. **활성측 하나**만 본다 — 좌우 최댓값을 쓰면 가려진 먼 쪽 추정이
+        // 튈 때마다 경고가 나고, 임계값 자체도 활성측 값으로 뽑았다
+        // (FrameFeatures.heelRise 주석 참고).
+        //
+        // 발이 짧게 보이는 세션은 값이 2배 시끄러워 판정하지 않는다
+        // (FormThresholds.minHeelFootRatio 주석의 실측 표 참고). 게이트를 여기서 거는
+        // 이유는 무릎–발끝 정렬의 발목 간격 게이트와 같다 — FrameFeatures는 재고,
+        // 쓸지는 판정이 정한다.
+        val footVisible = (features?.footTibiaRatio ?: 0f) >= form.minHeelFootRatio
+        val heelRise = features?.heelRise
+            ?.takeIf { cameraAngle.supports(FormCheck.HEEL_LIFT) && footVisible }
+
         // 골반 좌우 쏠림. 발목 간격 정규화라 기준선이 필요 없고, 좌우 비대칭 판정에
         // 속하므로 정면에서만 본다.
         val hipShiftRatio = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
@@ -127,6 +139,7 @@ class SquatFormAnalyzer(
             depthBasis = depthBasis,
             depthRatio = depthRatio,
             torsoLeanDegrees = torsoLean,
+            heelRise = heelRise,
             kneeSpreadRatio = kneeSpreadRatio(pose),
             hipShiftRatio = hipShiftRatio,
             kneeToeDeviation = kneeToeDeviation,
@@ -146,6 +159,7 @@ class SquatFormAnalyzer(
             warnings = warningsOf(
                 depth = depth,
                 torsoLeanDegrees = torsoLean,
+                heelRise = heelRise,
                 hipShiftRatio = hipShiftRatio,
                 kneeAlignment = form.kneeAlignmentByToe(kneeToeDeviation),
             ),
@@ -156,10 +170,28 @@ class SquatFormAnalyzer(
     private fun warningsOf(
         depth: DepthLevel?,
         torsoLeanDegrees: Float?,
+        heelRise: Float?,
         hipShiftRatio: Float?,
         kneeAlignment: KneeAlignment?,
     ): List<FormWarning> = buildList {
-        if (depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
+        val heelLifted = heelRise != null && heelRise > form.heelRiseLimit
+        if (heelLifted) add(FormWarning.HEEL_RISE)
+        /**
+         * 뒤꿈치가 뜨면 깊이 부족을 말하지 않는다.
+         *
+         * 올바른 스쿼트의 깊이는 **"뒤꿈치가 뜨지 않는 범위까지"**다. 두 경고가 함께 뜨면
+         * "뒤꿈치가 떴는데 더 깊게 앉으라"는 서로 반대인 지시가 되고, 사용자는 더 나쁜
+         * 자세로 밀린다.
+         *
+         * ## 무엇을 잃는가
+         * 뒤꿈치가 뜬 rep은 `error_flags`에 `SHALLOW_DEPTH`가 찍히지 않는다. 실제로 얕았을
+         * 수도 있지만, **그 원인이 발목 가동성이면 "더 깊게"는 틀린 처방이다.** 깊이 자체는
+         * `depth_level`·`depth_score`로 그대로 저장되므로 사실이 사라지지는 않는다.
+         *
+         * 반대로 억누르지 않는 이유: 뒤꿈치 들림은 [FormThresholds.minHeelFootRatio] 게이트
+         * 때문에 판정되지 않는 세션이 있다. 그때 깊이까지 막으면 두 항목을 동시에 잃는다.
+         */
+        if (!heelLifted && depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
         if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
             add(FormWarning.EXCESSIVE_LEAN)
         }

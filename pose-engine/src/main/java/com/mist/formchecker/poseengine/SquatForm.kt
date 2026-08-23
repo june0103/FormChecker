@@ -117,6 +117,13 @@ data class SquatForm(
     val depthRatio: Float?,
     val torsoLeanDegrees: Float?,
     /**
+     * 뒤꿈치 들림. 활성측 값이며 양수면 들림. 측면 전용이고 기준선이 필요하다.
+     *
+     * 게이트가 닫혀 판정하지 않은 경우에도 **값은 남긴다** — 개발 화면에서 왜 판정이
+     * 없는지 보려면 값과 게이트를 함께 봐야 한다.
+     */
+    val heelRise: Float?,
+    /**
      * 무릎폭 ÷ 발목폭. **판정이 아니라 측정값이다.**
      *
      * 무릎 정렬(valgus)은 이 값의 절대 크기로는 판정할 수 없다 — 정상 스쿼트에서도 선
@@ -214,6 +221,15 @@ enum class FormWarning(val check: FormCheck) {
      * 선 자세 기준선이 필요 없다.
      */
     KNEE_FLARED(FormCheck.KNEE_ALIGNMENT),
+
+    /**
+     * 발뒤꿈치가 바닥에서 떴다. 측면 전용.
+     *
+     * **[SHALLOW_DEPTH]보다 먼저 온다.** 뒤꿈치가 뜬 상태의 깊이는 발목 가동성의 한계를
+     * 넘은 것이므로, 이 경고가 있으면 깊이 부족을 말하지 않는다 — 순서만이 아니라
+     * 판정에서 아예 배제한다([SquatFormAnalyzer]의 `warningsOf`).
+     */
+    HEEL_RISE(FormCheck.HEEL_LIFT),
     SHALLOW_DEPTH(FormCheck.DEPTH),
     EXCESSIVE_LEAN(FormCheck.TORSO_LEAN),
 
