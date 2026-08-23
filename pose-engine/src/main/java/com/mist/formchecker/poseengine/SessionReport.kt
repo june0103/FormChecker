@@ -54,9 +54,67 @@ data class Finding(
     val repCount: Int,
     val judgedReps: Int,
     val side: Side?,
+    /**
+     * 이 문제가 주로 어느 구간에서 났나. 판단할 수 없으면 null이다.
+     *
+     * ## 왜 필요한가
+     * "무릎이 모여요"와 "무릎이 벌어져요"가 한 세션에 함께 나올 수 있다 — 실제로 내려갈
+     * 때와 올라올 때가 다른 사람이 있다. **언제인지를 말하지 않으면 사용자는 둘 중 무엇을
+     * 언제 고쳐야 하는지 알 수 없다.**
+     *
+     * 두 방향을 하나로 합치거나 한쪽만 보여주는 것으로는 해결되지 않는다. 둘 다 실제로
+     * 일어난 일이고, 구간이 다르면 **고치는 방법도 다르다.**
+     */
+    val phase: RepPhase? = null,
 ) {
     /** 판정한 rep 전부에서 났나. 임계값이 아니라 `repCount == judgedReps`라는 사실이다. */
     val everyRep: Boolean get() = judgedReps > 0 && repCount == judgedReps
+}
+
+/**
+ * 문제가 난 구간.
+ *
+ * [RepState]를 그대로 쓰지 않는 이유: 상태머신의 상태는 `IDLE`·`STANDING`까지 포함하는
+ * 반면 여기서는 **rep 안의 구간**만 뜻한다. 그리고 사용자에게 보이는 개념이라 상태머신이
+ * 바뀌어도 이쪽은 유지돼야 한다.
+ */
+enum class RepPhase {
+    /** 내려가는 중. */
+    DESCENDING,
+
+    /** 가장 낮은 지점 근처. */
+    BOTTOM,
+
+    /** 올라오는 중. */
+    ASCENDING,
+
+    /**
+     * 한 구간에 몰리지 않았다.
+     *
+     * 이걸 null과 구분하는 이유: null은 "구간을 기록하지 않았다"(예전 데이터)이고
+     * 이 값은 "기록했는데 특정 구간에 몰리지 않았다"다. 전자는 침묵해야 하고 후자는
+     * "동작 내내"라고 말할 수 있다.
+     */
+    THROUGHOUT,
+    ;
+
+    companion object {
+        /**
+         * 구간별 발생 횟수에서 대표 구간을 고른다.
+         *
+         * ## 경계에 근거가 없어 과반으로 둔다
+         * "몇 % 이상이면 그 구간이다"를 정할 데이터가 없다. **과반**은 임계값이 아니라
+         * "나머지 전부보다 많다"는 사실이므로 새로 정할 숫자가 없다. 과반이 없으면
+         * [THROUGHOUT]이다.
+         */
+        fun dominant(counts: Map<RepPhase, Int>): RepPhase? {
+            val real = counts.filterKeys { it != THROUGHOUT }.filterValues { it > 0 }
+            if (real.isEmpty()) return null
+            val total = real.values.sum()
+            val top = real.maxByOrNull { it.value }!!
+            return if (top.value * 2 > total) top.key else THROUGHOUT
+        }
+    }
 }
 
 /**
@@ -97,6 +155,13 @@ data class ReportedRep(
     val depthScore: Float?,
     /** 무릎 편차가 가장 컸던 쪽. 무릎 경고가 없으면 null이다. */
     val kneeToeSide: Side?,
+    /**
+     * 경고 종류별로 그 rep에서 문제가 났던 구간.
+     *
+     * 비어 있으면 구간을 기록하지 않은 rep이다(이 기능 이전에 저장된 것). 그때는 리포트가
+     * 구간을 말하지 않고 넘어간다.
+     */
+    val warningPhases: Map<FormWarning, Set<RepPhase>> = emptyMap(),
 )
 
 object SessionReporter {
@@ -130,6 +195,7 @@ object SessionReporter {
                 repCount = hits.size,
                 judgedReps = denominator,
                 side = dominantSide(warning, hits),
+                phase = dominantPhase(warning, hits),
             )
         }.sortedWith(
             // 빈도 내림차순. 같으면 비율이 높은 쪽(= 분모가 작은데도 자주 난 쪽)이 먼저다.
@@ -174,6 +240,23 @@ object SessionReporter {
         val dominant = if (left * 2 >= sides.size) Side.LEFT else Side.RIGHT
         val share = sides.count { it == dominant }.toFloat() / sides.size
         return dominant.takeIf { share >= SIDE_DOMINANCE }
+    }
+
+    /**
+     * 이 문제가 주로 어느 구간에서 났나.
+     *
+     * rep마다 여러 구간에서 날 수 있으므로 **구간별로 rep 수를 센다** — 한 rep에서 하강과
+     * 상승 모두에 났으면 두 구간에 각각 1을 더한다. 프레임 수로 세지 않는 이유: 구간마다
+     * 길이가 달라 긴 구간이 항상 이긴다.
+     */
+    private fun dominantPhase(warning: FormWarning, hits: List<ReportedRep>): RepPhase? {
+        val counts = mutableMapOf<RepPhase, Int>()
+        for (rep in hits) {
+            for (phase in rep.warningPhases[warning].orEmpty()) {
+                counts[phase] = (counts[phase] ?: 0) + 1
+            }
+        }
+        return RepPhase.dominant(counts)
     }
 
     private fun depthSummaryOf(judged: List<ReportedRep>): DepthSummary? {

@@ -171,6 +171,15 @@ data class RepRecordEntity(
      */
     @ColumnInfo(name = "knee_toe_side") val kneeToeSide: String? = null,
 
+    /**
+     * 경고 종류별로 문제가 났던 구간. `{"knee_flared":["DESCENDING"],...}` JSON.
+     *
+     * null이면 **구간을 기록하지 않은 rep**이다(이 컬럼 이전에 저장된 것). 빈 객체와
+     * 구분해야 한다 — 빈 객체는 "기록했는데 구간이 없었다"이고, null은 "모른다"다.
+     * 리포트는 모를 때 구간을 말하지 않고 넘어간다.
+     */
+    @ColumnInfo(name = "warning_phases") val warningPhases: String? = null,
+
     @ColumnInfo(name = "sync_status") val syncStatus: SyncStatus = SyncStatus.PENDING,
 )
 

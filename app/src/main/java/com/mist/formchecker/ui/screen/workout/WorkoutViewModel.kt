@@ -25,6 +25,7 @@ import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngineHandle
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepFrame
+import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.RepStateMachine
 import com.mist.formchecker.poseengine.RepSummary
@@ -332,6 +333,19 @@ class WorkoutViewModel @Inject constructor(
      */
     private var repWorstKnee: Pair<Side, Float>? = null
 
+    /**
+     * 이 rep에서 경고 종류별로 문제가 났던 구간.
+     *
+     * ## 왜 구간을 남기는가
+     * "무릎이 모여요"와 "무릎이 벌어져요"가 한 rep에 함께 날 수 있다. **언제인지를 말하지
+     * 않으면 사용자는 둘 중 무엇을 언제 고쳐야 하는지 알 수 없다** — 내려갈 때 벌어지는
+     * 것과 올라올 때 모이는 것은 고치는 방법이 다르다.
+     *
+     * 프레임 수가 아니라 **구간 집합**을 담는다. 구간마다 길이가 달라 프레임 수로 세면
+     * 긴 구간이 항상 이긴다.
+     */
+    private val repWarningPhases = mutableMapOf<FormWarning, MutableSet<RepPhase>>()
+
     /** 준비 시간 카운트다운. 취소·재시작·화면 이탈 시 반드시 끊어야 한다. */
     private var prepJob: Job? = null
 
@@ -460,12 +474,20 @@ class WorkoutViewModel @Inject constructor(
             repMaxShinDepth = null
             repWarnings.clear()
             repWorstKnee = null
+            repWarningPhases.clear()
         }
         // rep 구간 안이면 경고를 모은다. 선 자세·미인식 구간의 경고는 그 rep의 자세가
         // 아니므로 넣지 않는다. Completed가 뜬 프레임은 이미 STANDING으로 넘어가 있지만,
         // 그 직전 ASCENDING 프레임들이 이미 반영돼 있어 놓치는 것이 없다.
         if (stateMachine.state in REP_PHASES) {
             repWarnings += form.warnings
+            // 어느 구간에서 났는지 함께 남긴다. 같은 rep에서 두 방향이 다른 구간에 나면
+            // 리포트가 "내려갈 때 벌어지고, 올라올 때 모여요"라고 말할 수 있다.
+            phaseOf(stateMachine.state)?.let { phase ->
+                for (warning in form.warnings) {
+                    repWarningPhases.getOrPut(warning) { mutableSetOf() } += phase
+                }
+            }
             // 편차의 절대값이 가장 컸던 프레임의 쪽을 남긴다.
             val side = form.kneeToeSide
             val deviation = form.kneeToeDeviation
@@ -581,6 +603,7 @@ class WorkoutViewModel @Inject constructor(
             maxTorsoLeanDegrees = summary.aggregate.maxTorsoLeanDegrees,
             validFrameRatio = summary.aggregate.validFrameRatio,
             kneeToeSide = repWorstKnee?.first?.name,
+            warningPhases = repWarningPhases.mapValues { it.value.toSet() },
         )
     }
 
@@ -956,6 +979,14 @@ class WorkoutViewModel @Inject constructor(
 
     private companion object {
         /** rep 구간으로 취급하는 상태. 선 자세·미인식은 rep 밖이다. */
+        /** 상태머신 상태를 리포트가 쓰는 구간으로 옮긴다. rep 밖이면 null이다. */
+        private fun phaseOf(state: RepState): RepPhase? = when (state) {
+            RepState.DESCENDING -> RepPhase.DESCENDING
+            RepState.BOTTOM -> RepPhase.BOTTOM
+            RepState.ASCENDING -> RepPhase.ASCENDING
+            RepState.IDLE, RepState.STANDING -> null
+        }
+
         private val REP_PHASES = setOf(
             RepState.DESCENDING, RepState.BOTTOM, RepState.ASCENDING,
         )

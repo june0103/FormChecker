@@ -26,6 +26,7 @@ class SessionReportTest {
         depthScore: Float? = null,
         side: Side? = null,
         checked: Int = RepScorer.checksFor(angle).size,
+        phases: Map<FormWarning, Set<RepPhase>> = emptyMap(),
     ) = ReportedRep(
         cameraAngle = angle,
         checkedCount = checked,
@@ -33,6 +34,7 @@ class SessionReportTest {
         depthLevel = depth,
         depthScore = depthScore,
         kneeToeSide = side,
+        warningPhases = phases,
     )
 
     // ── 분모 ────────────────────────────────────────────────
@@ -152,6 +154,85 @@ class SessionReportTest {
 
         assertEquals(emptyList<NotJudged>(), report.notJudged)
         assertTrue(report.noFindings)
+    }
+
+    // ── 구간 ────────────────────────────────────────────────
+
+    /**
+     * 같은 세션에서 두 방향이 **다른 구간**에 나면 각각 그 구간으로 보고해야 한다.
+     *
+     * 이게 이 기능의 이유다 — "무릎이 모여요"와 "무릎이 벌어져요"가 함께 떠도, 언제인지를
+     * 말하지 않으면 사용자는 **둘 중 무엇을 언제 고쳐야 하는지 알 수 없다.**
+     */
+    @Test
+    fun `두 방향이 다른 구간에 나면 각각 그 구간으로 말한다`() {
+        val reps = List(10) {
+            rep(
+                CameraAngle.FRONT,
+                warnings = setOf(FormWarning.KNEE_FLARED, FormWarning.KNEE_VALGUS),
+                phases = mapOf(
+                    FormWarning.KNEE_FLARED to setOf(RepPhase.DESCENDING),
+                    FormWarning.KNEE_VALGUS to setOf(RepPhase.ASCENDING),
+                ),
+            )
+        }
+
+        val report = SessionReporter.build(reps)
+        val flared = report.findings.single { it.warning == FormWarning.KNEE_FLARED }
+        val valgus = report.findings.single { it.warning == FormWarning.KNEE_VALGUS }
+
+        assertEquals(RepPhase.DESCENDING, flared.phase)
+        assertEquals(RepPhase.ASCENDING, valgus.phase)
+    }
+
+    /** 과반이 없으면 한 구간으로 몰아붙이지 않는다. 임계값이 아니라 "나머지보다 많다"는 사실이다. */
+    @Test
+    fun `구간이 몰리지 않으면 동작 내내로 본다`() {
+        val reps = List(6) {
+            rep(
+                CameraAngle.FRONT,
+                warnings = setOf(FormWarning.KNEE_VALGUS),
+                phases = mapOf(
+                    FormWarning.KNEE_VALGUS to when (it % 3) {
+                        0 -> setOf(RepPhase.DESCENDING)
+                        1 -> setOf(RepPhase.BOTTOM)
+                        else -> setOf(RepPhase.ASCENDING)
+                    },
+                ),
+            )
+        }
+
+        assertEquals(RepPhase.THROUGHOUT, SessionReporter.build(reps).findings.single().phase)
+    }
+
+    /**
+     * 구간을 기록하지 않은 rep은 구간을 말하지 않는다.
+     *
+     * null과 [RepPhase.THROUGHOUT]을 구분해야 한다 — 전자는 "모른다"(이 기능 이전 기록),
+     * 후자는 "기록했는데 몰리지 않았다"다. 모를 때 지어내면 안 된다.
+     */
+    @Test
+    fun `구간을 모르면 말하지 않는다`() {
+        val reps = List(5) { rep(CameraAngle.FRONT, warnings = setOf(FormWarning.KNEE_VALGUS)) }
+
+        assertNull(SessionReporter.build(reps).findings.single().phase)
+    }
+
+    /** 한 rep에서 여러 구간에 났으면 구간마다 센다. 프레임 수가 아니라 rep 수다. */
+    @Test
+    fun `한 rep이 여러 구간에 걸치면 구간마다 센다`() {
+        val reps = List(5) {
+            rep(
+                CameraAngle.FRONT,
+                warnings = setOf(FormWarning.KNEE_VALGUS),
+                phases = mapOf(
+                    // 5 rep 전부 하강+최저점. 과반이 없으므로 THROUGHOUT.
+                    FormWarning.KNEE_VALGUS to setOf(RepPhase.DESCENDING, RepPhase.BOTTOM),
+                ),
+            )
+        }
+
+        assertEquals(RepPhase.THROUGHOUT, SessionReporter.build(reps).findings.single().phase)
     }
 
     // ── 좌우 지목 ───────────────────────────────────────────
