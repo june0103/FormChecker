@@ -52,7 +52,8 @@ fun FormCheckerNavHost(
             // 개발·검증용. 수치가 전부 올라간다.
             WorkoutScreen(
                 onFinish = { sessionId ->
-                    navController.navigate(SessionSummary(sessionId)) {
+                    // 개발 화면에서 끝냈으면 결과에도 성능 카드를 띄운다.
+                    navController.navigate(SessionSummary(sessionId, diagnostics = true)) {
                         popUpTo<WorkoutLab> { inclusive = true }
                     }
                 },
@@ -81,6 +82,7 @@ fun FormCheckerNavHost(
         composable<SessionSummary> { backStackEntry ->
             val route = backStackEntry.toRoute<SessionSummary>()
             SessionSummaryScreen(
+                showDiagnostics = route.diagnostics,
                 sessionId = route.sessionId,
                 onDone = {
                     navController.navigate(Home) {
