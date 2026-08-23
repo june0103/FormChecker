@@ -160,11 +160,9 @@ private fun ExerciseContent(
             }
         }
 
-        CameraAngleSelector(
-            selected = state.cameraAngle,
-            onSelect = viewModel::selectCameraAngle,
-        )
-
+        // 촬영 방향 선택 버튼을 없앴다. 기준 자세 창의 다수결이 정한다 —
+        // 사용자가 고를 이유가 없고(자기가 어느 방향으로 서 있는지는 앱이 더 잘 안다),
+        // 고르게 두면 잘못 고른 채로 운동해도 앱이 아무 말 없이 틀린 판정을 낸다.
         CalibrationBar(
             state = state,
             onStart = viewModel::startCalibration,
@@ -302,11 +300,10 @@ private fun ExerciseHud(
             val form = state.form
 
             // 조치가 필요한 것부터: 각도 안내 → 경고 → 인식 실패.
+            // 판정 중인 방향과 실제 방향이 다르면 알린다. **전환 버튼은 없다** —
+            // 기준선이 그 방향에서 잰 값이라 방향만 바꾸면 어긋난다. 다시 재야 한다.
             form?.suggestedAngle?.let { suggested ->
-                AngleMismatchNotice(
-                    suggested = suggested,
-                    onSwitch = { onSwitchAngle(suggested) },
-                )
+                AngleMismatchNotice(suggested = suggested, onSwitch = null)
             }
 
             state.heldWarnings.forEach { FormWarningRow(it) }

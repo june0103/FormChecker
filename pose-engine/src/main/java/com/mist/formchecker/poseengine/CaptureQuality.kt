@@ -104,7 +104,7 @@ data class CaptureQuality(
             }
 
             // 촬영 방향 추정 — 어깨폭÷몸통길이. 정면은 어깨가 넓게, 측면은 겹쳐 보인다.
-            val estimated = estimateView(pose, aspectRatio, minConfidence)
+            val estimated = estimateView(pose, aspectRatio, minConfidence = minConfidence)
             when (estimated) {
                 EstimatedView.AMBIGUOUS -> problems += Problem.AMBIGUOUS_VIEW
                 EstimatedView.FRONT ->
@@ -135,9 +135,50 @@ data class CaptureQuality(
          * @return 애매한 구간이면 [EstimatedView.AMBIGUOUS] — 45도를 거부하기 위한 것이다.
          *   계산 자체가 불가능하면 null.
          */
+        /**
+         * 여러 프레임의 다수결로 촬영 방향을 정한다. **판정에 쓰는 것은 이쪽이다.**
+         *
+         * ## 프레임 단위로는 쓸 수 없다
+         * 실측 15세션(정면 12·측면 3)의 프레임을 정답과 대조했다.
+         *
+         * | 정답 | 맞음 | 애매 | 틀림 |
+         * |---|---|---|---|
+         * | 정면 12,332프레임 | 99.5% | 0.0% | **0.5%** |
+         * | 측면 2,589프레임 | 96.9% | 2.6% | **0.5%** |
+         *
+         * 틀린 프레임이 **두 세션에 몰려 있다** — 어깨 키포인트가 무너진 정면 세션 하나가
+         * 8.7%를 측면으로 읽었고, 발이 잘 안 보인 측면 세션 하나가 9.0%를 애매로 냈다.
+         * 프레임마다 방향을 바꾸면 한 rep 안에서 판정 항목이 뒤바뀐다.
+         *
+         * ## 세션 단위로는 깨끗하게 갈린다
+         * 같은 데이터의 세션별 READY 중앙값:
+         *
+         * | 정답 | 어깨폭/몸통 중앙값 |
+         * |---|---|
+         * | 정면 12세션 | 0.675 ~ 0.731 |
+         * | 측면 3세션 | 0.058 ~ 0.105 |
+         *
+         * **0.15와 0.55 사이가 비어 있고 15/15 전부 맞는다.** 그래서 방향은 프레임이 수십 장
+         * 모인 창에서 한 번 정하고 고정한다 — 활성측을 캘리브레이션 창에서 정하는 것과
+         * 같은 이유다([StandingCalibration.nearerSide]).
+         *
+         * @return 다수결 결과. 한 프레임도 추정하지 못했으면 null.
+         */
+        fun estimateView(
+            frames: List<Pair<Pose, Float>>,
+            thresholds: AngleDetectionThresholds = AngleDetectionThresholds(),
+            minConfidence: Float = StandingCalibration.MIN_CONFIDENCE,
+        ): EstimatedView? = frames
+            .mapNotNull { (pose, aspect) -> estimateView(pose, aspect, thresholds, minConfidence) }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
         fun estimateView(
             pose: Pose,
             aspectRatio: Float,
+            thresholds: AngleDetectionThresholds = AngleDetectionThresholds(),
             minConfidence: Float = StandingCalibration.MIN_CONFIDENCE,
         ): EstimatedView? {
             val joints = listOf(
@@ -155,12 +196,12 @@ data class CaptureQuality(
             )
             val hipCenter = Geometry.midpoint(p(KeypointType.LEFT_HIP), p(KeypointType.RIGHT_HIP))
             val trunk = Geometry.distance(shoulderCenter, hipCenter)
-            if (trunk < MIN_TRUNK_LENGTH) return null
+            if (trunk < thresholds.minTorsoLength) return null
 
             val ratio = shoulderSpread / trunk
             return when {
-                ratio >= FRONT_RATIO -> EstimatedView.FRONT
-                ratio <= SIDE_RATIO -> EstimatedView.SIDE
+                ratio >= thresholds.frontRatio -> EstimatedView.FRONT
+                ratio <= thresholds.sideRatio -> EstimatedView.SIDE
                 else -> EstimatedView.AMBIGUOUS
             }
         }
@@ -169,12 +210,8 @@ data class CaptureQuality(
         private const val MIN_COVERAGE = 0.55f
         private const val MAX_COVERAGE = 0.98f
 
-        /** 어깨폭÷몸통길이. 이 이상이면 정면. */
-        private const val FRONT_RATIO = 0.55f
-
-        /** 이 이하면 측면. 사이 구간은 45도로 보고 거부한다. */
-        private const val SIDE_RATIO = 0.30f
-
-        private const val MIN_TRUNK_LENGTH = 0.05f
+        // 방향 판별 경계는 [AngleDetectionThresholds]가 정본이다. 예전에는 이 파일에
+        // 별도 상수가 있었고 `SIDE_RATIO`가 0.30, 저쪽이 0.25로 **갈라져 있었다** —
+        // 같은 것을 재는 두 벌의 숫자였다.
     }
 }

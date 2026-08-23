@@ -203,19 +203,23 @@ internal fun AngleOption(
 }
 
 /**
- * 고른 각도와 실제로 서 있는 방향이 다를 때의 안내.
+ * 지금 판정 중인 방향과 실제로 서 있는 방향이 다를 때의 안내.
  *
- * 자동으로 전환하지 않는 이유: 오탐이 나면 판정 항목이 멋대로 바뀌어 더 혼란스럽다.
- * 다만 안내조차 없으면 측면 모드로 정면에 서 있어도 앱이 아무 말 없이 틀린 깊이를
- * 계산하게 되는데, 크래시가 없어 발견되지 않는다.
+ * ## 자동으로 전환하지 않는다
+ * 방향은 기준 자세 창의 다수결로 확정된다. 그 뒤에 프레임 하나를 보고 갈아타면 안 된다 —
+ * 실측에서 프레임 단위 추정은 0.5%가 반대로 읽힌다. **그리고 기준선 자체가 그 방향에서
+ * 잰 값이라**(활성측·분모·원근 조건이 다르다) 방향만 바꾸면 기준선과 어긋난다.
+ *
+ * @param onSwitch 눌러서 바로 전환할 수 있으면 넘긴다. null이면 안내만 한다 —
+ *   사용자용 화면이 그렇다. 거기서 방향을 바꾸는 길은 기준 자세를 다시 재는 것뿐이다.
  */
 @Composable
 internal fun AngleMismatchNotice(
     suggested: CameraAngle,
-    onSwitch: () -> Unit,
+    onSwitch: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val name = if (suggested == CameraAngle.FRONT) "정면" else "측면"
+    val name = FeedbackLabels.angle(suggested)
 
     Row(
         modifier = modifier
@@ -230,17 +234,24 @@ internal fun AngleMismatchNotice(
         Text("ⓘ", color = FeedbackInfo, style = MaterialTheme.typography.titleLarge)
         Text(
             // 각도가 어긋나면 판정 항목이 통째로 바뀐다. 떨어져 선 자리에서 알아야 한다.
-            text = "$name 으로 서 계신 것 같습니다",
+            text = if (onSwitch != null) {
+                "$name 으로 서 계신 것 같습니다"
+            } else {
+                // 사용자용 화면에는 전환 버튼이 없다. 무엇을 해야 하는지 말한다.
+                "$name 으로 서 계신 것 같아요. 기준 자세를 다시 재주세요"
+            },
             style = MaterialTheme.typography.titleMedium,
             color = FeedbackInfo,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            text = "전환",
-            style = MaterialTheme.typography.labelLarge,
-            color = FeedbackInfo,
-            modifier = Modifier.clickable(onClick = onSwitch).padding(Spacing.xs),
-        )
+        if (onSwitch != null) {
+            Text(
+                text = "전환",
+                style = MaterialTheme.typography.labelLarge,
+                color = FeedbackInfo,
+                modifier = Modifier.clickable(onClick = onSwitch).padding(Spacing.xs),
+            )
+        }
     }
 }
 
@@ -375,7 +386,9 @@ internal fun CalibrationBar(
                 InfoNote(notes) {
                     Text(
                         text = if (collapseDetails) {
-                            "기준 자세를 다 쟀어요"
+                            // 방향을 사용자가 고르지 않으므로, **무엇으로 판정 중인지**를
+                            // 말해줘야 한다. 안 그러면 왜 이 문구가 나오는지 알 수 없다.
+                            "기준 자세를 다 쟀어요 · ${FeedbackLabels.angle(state.cameraAngle)}"
                         } else {
                             listOfNotNull("기준선 확보", baselineNote(state))
                                 .joinToString(" · ")

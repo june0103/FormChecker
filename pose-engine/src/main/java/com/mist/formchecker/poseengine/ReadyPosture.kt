@@ -379,7 +379,7 @@ data class ReadyPosture(
                 leftToe = toeDirection(Side.LEFT),
                 rightToe = toeDirection(Side.RIGHT),
                 kneeFlexion = kneeFlexion,
-                view = CaptureQuality.estimateView(pose, aspect, minConfidence),
+                view = CaptureQuality.estimateView(pose, aspect, minConfidence = minConfidence),
             )
         }
 
