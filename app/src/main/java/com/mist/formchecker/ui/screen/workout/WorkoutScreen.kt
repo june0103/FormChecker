@@ -65,10 +65,26 @@ import com.mist.formchecker.ui.theme.TextPrimary
 import com.mist.formchecker.ui.theme.TouchTarget
 
 /**
- * 운동 화면 — 현재는 **카메라와 관절 각도 계산이 실제로 동작하는지 확인하는 단계**다.
+ * 운동 화면 — **개발·검증용**. 사용자용은 [ExerciseScreen]이다.
  *
- * rep 카운팅 상태머신·피드백 배너·세션 저장은 아직 없다. 설계문서 3.2절의 4~5번과
- * 7장 동기화는 각도가 신뢰할 만하다는 게 확인된 뒤에 얹는다.
+ * ## 두 화면의 관계
+ * 판정은 [WorkoutViewModel] 하나를 공유한다. **동작은 같고 보여주는 것만 다르다** —
+ * 여기서 확인한 판정이 곧 사용자 화면에서 일어나는 판정이다. 로직을 복제하지 않았으므로
+ * 두 화면이 다른 답을 낼 수 없다.
+ *
+ * ## 여기만 있는 것
+ * - 모델 전환(RTMPose ↔ MoveNet) — 스켈레톤 정렬과 추론 시간을 나란히 보기 위함
+ * - 무릎 각도·깊이비·무릎폭비·좌우차·힙쏠림·무릎–발끝 편차
+ * - 기준선 정규화 원값(대퇴각·몸통각·힙낙하·무릎 내측이동)
+ * - 추론 지연·fps·모델 로딩·드롭 프레임
+ * - rep 상태(하강/최저점/상승)와 중단 사유
+ *
+ * ## 왜 지우지 않고 남기는가
+ * 이 수치들은 임계값을 실측으로 확정하는 동안 **기기 화면에서 눈으로 확인해야 했던
+ * 값**이다 (`기술선택_기록.md`의 여러 항목이 그렇게 나왔다 — 깊이 게이트가 열리는지,
+ * 정규화가 0 근처인지). 미판정 항목이 아직 남아 있으므로 다음 판정을 추가할 때 또 필요하다.
+ *
+ * 사용자용 화면에서 뺀 기준은 **"사용자가 이 값을 보고 조치할 수 있는가"**다.
  */
 @Composable
 fun WorkoutScreen(
@@ -477,76 +493,7 @@ private fun PoseModelSelector(
     }
 }
 
-/**
- * 촬영 각도 선택.
- *
- * 2D 단일 카메라로는 깊이와 무릎 정렬을 동시에 정확히 볼 수 없어(측면은 무릎·발목이
- * 겹쳐 보이고, 정면은 원근으로 각도가 왜곡된다) 각도를 명시적으로 고르게 한다.
- * 각 버튼에 그 각도에서 무엇을 판정하는지 함께 적어, 사용자가 목적에 맞게 고를 수 있게 한다.
- */
-@Composable
-private fun CameraAngleSelector(
-    selected: CameraAngle,
-    onSelect: (CameraAngle) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        AngleOption(
-            label = "측면",
-            description = "깊이·상체",
-            isSelected = selected == CameraAngle.SIDE,
-            onClick = { onSelect(CameraAngle.SIDE) },
-            modifier = Modifier.weight(1f),
-        )
-        AngleOption(
-            label = "정면",
-            description = "무릎 정렬",
-            isSelected = selected == CameraAngle.FRONT,
-            onClick = { onSelect(CameraAngle.FRONT) },
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
 
-@Composable
-private fun AngleOption(
-    label: String,
-    description: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // 각도별로 무엇을 판정하는지 함께 보여주되, 두 줄이 48dp 안에 들어가도록
-    // 글자 크기와 내부 여백을 줄인다.
-    val content: @Composable () -> Unit = {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text(
-                description,
-                style = MaterialTheme.typography.labelSmall,
-                color = LocalContentColor.current.copy(alpha = 0.8f),
-            )
-        }
-    }
-
-    val buttonModifier = modifier.height(TouchTarget.minSize)
-    if (isSelected) {
-        Button(
-            onClick = onClick,
-            modifier = buttonModifier,
-            contentPadding = CompactButtonPadding,
-        ) { content() }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = buttonModifier,
-            contentPadding = CompactButtonPadding,
-        ) { content() }
-    }
-}
 
 /**
  * 카메라 공간을 최대한 확보하기 위한 축소 여백.
@@ -554,254 +501,13 @@ private fun AngleOption(
  * Material3 기본값은 상하 8dp인데, 두 줄 라벨을 48dp 안에 넣으려면 그만큼이 부족하다.
  * 버튼 자체 크기(48dp)는 유지하므로 터치 타겟은 규칙을 지킨다.
  */
-private val CompactButtonPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
 
-/**
- * 고른 각도와 실제로 서 있는 방향이 다를 때의 안내.
- *
- * 자동으로 전환하지 않는 이유: 오탐이 나면 판정 항목이 멋대로 바뀌어 더 혼란스럽다.
- * 다만 안내조차 없으면 측면 모드로 정면에 서 있어도 앱이 아무 말 없이 틀린 깊이를
- * 계산하게 되는데, 크래시가 없어 발견되지 않는다.
- */
-@Composable
-private fun AngleMismatchNotice(
-    suggested: CameraAngle,
-    onSwitch: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val name = if (suggested == CameraAngle.FRONT) "정면" else "측면"
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.md))
-            .background(FeedbackInfoContainer)
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        // 색만으로 상태를 전달하지 않는다 (디자인시스템 34행 — 색각 이상 고려).
-        Text("ⓘ", color = FeedbackInfo, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            text = "$name 으로 서 계신 것 같습니다",
-            style = MaterialTheme.typography.bodyMedium,
-            color = FeedbackInfo,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = "전환",
-            style = MaterialTheme.typography.labelLarge,
-            color = FeedbackInfo,
-            modifier = Modifier.clickable(onClick = onSwitch).padding(Spacing.xs),
-        )
-    }
-}
 
-/**
- * @param side 무릎 경고에 붙일 쪽(사람 기준). "무릎을 벌려주세요"보다 "왼쪽 무릎을
- *   벌려주세요"가 실행 가능한 지시다. 무릎 경고가 아니면 무시한다 — 깊이·상체·골반은
- *   양쪽을 함께 보는 판정이라 쪽이 없다.
- */
-@Composable
-private fun FormWarningRow(
-    warning: FormWarning,
-    side: Side? = null,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.md))
-            .background(FeedbackWarningContainer)
-            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        // 디자인시스템 34행: 경고는 색과 아이콘을 함께 쓴다.
-        Text("!", color = FeedbackWarning, style = MaterialTheme.typography.labelLarge)
-        Text(
-            text = warning.messageWith(side),
-            style = MaterialTheme.typography.bodyMedium,
-            color = FeedbackWarning,
-        )
-    }
-}
 
-/**
- * 기준 자세 측정 줄.
- *
- * ## 왜 운동 흐름을 막지 않는가
- * 수집 화면은 캘리브레이션이 실패하면 진행을 막는다 — 기준선이 잘못되면 그 세션 전체가
- * 쓸 수 없다. 운동 화면은 제품이고, **rep 카운팅은 무릎 각도만 쓰므로 기준선 없이도
- * 동작한다.** 카운팅을 막으면 얻는 것 없이 운동만 끊긴다.
- *
- * 그래서 여기서는 기준선이 **없으면 무엇을 못 하는지**만 알린다. 문서 §2.3이 카운팅과
- * 자세 평가를 분리한 것과 같은 이유다.
- */
-@Composable
-private fun CalibrationBar(
-    state: WorkoutUiState,
-    onStart: () -> Unit,
-    onCancel: () -> Unit,
-    onSelectPrepSeconds: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-    ) {
-        when (state.calibrationStage) {
-            CalibrationStage.PREPARING -> {
-                val seconds = (state.calibrationPrepRemainingMs + 999) / 1000
-                Text(
-                    text = "카메라 앞에 서 주세요 — ${seconds}초 후 측정을 시작해요",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
-                Text(
-                    // 카운트다운이 끝나기 전에 자기 위치를 고칠 수 있어야 한다.
-                    // 이 줄이 없으면 3초를 더 기다린 뒤에야 실패를 알게 된다.
-                    text = if (state.calibrationSubjectVisible) {
-                        "지금 자리 좋아요. 그대로 곧게 서 계세요."
-                    } else {
-                        "아직 전신이 다 안 보여요. 머리부터 발까지 화면에 들어오게 서 주세요."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (state.calibrationSubjectVisible) LimeGreen else FeedbackWarning,
-                )
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("취소") }
-            }
 
-            CalibrationStage.COLLECTING -> {
-                val seconds = (state.calibrationRemainingMs + 999) / 1000
-                Text(
-                    text = "그대로 계세요 — ${seconds}초",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
-                Text(
-                    // 다시 채워지는 이유를 알려줘야 사용자가 자세를 고칠 수 있다.
-                    text = "몸이 가려지면 처음부터 다시 세요.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                )
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("취소") }
-            }
 
-            CalibrationStage.READY -> {
-                val calibration = state.calibration
-                Text(
-                    text = buildString {
-                        append("기준선 확보")
-                        state.activeSide?.let { append(" · ${it.label()} 기준") }
-                        calibration?.let {
-                            append(" · 다리 ${it.legLength.formatRatio()}")
-                            append(" · 대퇴/정강이 ${it.femurTibiaRatio.formatRatio()}")
-                            append(" · 지터 ${"%.4f".format(it.jitter)}")
-                        }
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = LimeGreen,
-                )
-                // 차단하지 않는 문제. 어떤 특징이 빠지는지 알려야 한다.
-                state.calibrationProblems.forEach { CalibrationProblemRow(it) }
-                OutlinedButton(
-                    onClick = onStart,
-                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) { Text("기준 자세 다시 재기") }
-            }
 
-            CalibrationStage.NONE -> {
-                Text(
-                    // 이 문구는 #24 이전 동작을 설명하고 있었다("각도 기준으로 대체").
-                    // 각도 경로는 제거됐고 이제 정강이 길이로 정규화한다 — 기준 자세가
-                    // 없어도 판정은 되고, 다리 길이 대신 매 프레임 정강이를 쓰므로
-                    // 값이 조금 더 흔들린다.
-                    text = "기준 자세를 아직 안 재셨어요. 이대로도 자세는 봐드리지만, " +
-                        "키와 다리 길이를 몰라서 앉은 깊이가 조금 덜 정확할 수 있어요. " +
-                        "3초만 서 계시면 더 정확해져요.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                )
-                state.calibrationProblems.forEach { CalibrationProblemRow(it) }
-                PrepSecondsPicker(
-                    selected = state.calibrationPrepSeconds,
-                    onSelect = onSelectPrepSeconds,
-                )
-                Button(
-                    onClick = onStart,
-                    modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-                ) {
-                    Text(
-                        if (state.calibrationPrepSeconds > 0) {
-                            "기준 자세 재기 (${state.calibrationPrepSeconds}초 후 시작)"
-                        } else {
-                            "기준 자세 재기"
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 준비 시간 선택.
- *
- * 고를 수 있게 둔 이유: 버튼을 누른 자리와 서야 할 자리 사이의 거리가 사람마다 다르다.
- * 삼각대를 앞에 두고 화면에 손이 닿으면 0초가 맞고, 방 건너편에 두었으면 10초도 짧다.
- * 하나로 고정하면 한쪽은 매번 기다리고 다른 쪽은 매번 실패한다.
- */
-@Composable
-private fun PrepSecondsPicker(selected: Int, onSelect: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "준비 시간",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextMuted,
-        )
-        CalibrationPrep.OPTIONS.forEach { seconds ->
-            val active = seconds == selected
-            OutlinedButton(
-                onClick = { onSelect(seconds) },
-                modifier = Modifier.height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = if (active) LimeGreen else TextMuted,
-                ),
-            ) {
-                Text(
-                    if (seconds == 0) "바로" else "${seconds}초",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CalibrationProblemRow(problem: StandingCalibration.Problem) {
-    Text(
-        text = problem.message,
-        style = MaterialTheme.typography.labelSmall,
-        // 차단 여부로 색을 나눈다. 발 미검출은 진행을 막지 않으므로 경고가 아니다.
-        color = if (problem.blocking) FeedbackWarning else TextMuted,
-    )
-}
-
-private fun Side.label(): String = if (this == Side.LEFT) "왼쪽" else "오른쪽"
-
-private fun Float.formatRatio(): String = "%.2f".format(this)
 
 /**
  * 판정 기준 꼬리표.
@@ -809,85 +515,20 @@ private fun Float.formatRatio(): String = "%.2f".format(this)
  * 무릎 각도 기준은 같은 깊이에서도 체절 비율에 따라 달라진다. 기준선이 있을 때와 없을 때
  * 판정이 바뀌는데, 그 사실을 표시하지 않으면 사용자·개발자 모두 원인을 찾을 수 없다.
  */
-/**
- * 무릎 경고에만 쪽을 붙인다.
- *
- * 사람 기준 좌/우다(화면 기준이 아니다) — 코치가 말하듯 "왼쪽 무릎"이 사용자 자신의
- * 왼쪽을 가리켜야 한다. [FrameFeatures]가 편차를 계산할 때 이미 화면 좌우를 사람 좌우로
- * 뒤집어 두었다.
- */
-private fun FormWarning.messageWith(side: Side?): String = when {
-    side == null -> message
-    this == FormWarning.KNEE_VALGUS || this == FormWarning.KNEE_FLARED ->
-        "${if (side == Side.LEFT) "왼쪽" else "오른쪽"} $message"
-    else -> message
-}
 
 private fun DepthBasis.suffix(): String = when (this) {
     DepthBasis.HIP_HEIGHT -> "(높이)"
     DepthBasis.SHIN_LENGTH -> "(정강이)"
 }
 
-/**
- * 깊이 단계 이름. [FeedbackLabels]에 위임한다.
- *
- * 여기에 따로 적어 두면 운동 중 화면과 결과 리포트가 같은 단계를 다르게 부른다 —
- * 실제로 "부족/적정/충분"과 "얕음/적당/깊음"으로 갈려 있었다.
- */
-private fun DepthLevel.label(): String = FeedbackLabels.depth(this)
+
+
+private fun Float.format(): String = "%.1f".format(this)
+private fun Double.format(): String = "%.1f".format(this)
+private fun Float?.formatOrDash(): String = this?.let { "${it.format()}°" } ?: "—"
 
 private fun KneeAlignment.label(): String = when (this) {
     KneeAlignment.GOOD -> "정상"
     KneeAlignment.VALGUS -> "모임"
     KneeAlignment.FLARED -> "과도한 벌림"
 }
-
-@Composable
-private fun CameraPermissionRequired(
-    denied: Boolean,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (!denied) {
-        // 권한 다이얼로그가 뜨는 짧은 순간. 오류 문구를 띄우면 깜빡임이 되므로 비워둔다.
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-        }
-        return
-    }
-
-    Column(
-        modifier = modifier.fillMaxSize().padding(Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = "카메라 권한이 필요합니다",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Text(
-            text = "자세를 인식하려면 카메라 접근을 허용해야 합니다. 영상은 기기 밖으로 전송되지 않습니다.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Button(
-            onClick = onRetry,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget.minSize),
-        ) {
-            Text("권한 허용하기")
-        }
-        OutlinedButton(
-            onClick = onBack,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget.minSize),
-        ) {
-            Text("뒤로")
-        }
-    }
-}
-
-private fun Float.format(): String = "%.1f".format(this)
-private fun Double.format(): String = "%.1f".format(this)
-private fun Float?.formatOrDash(): String = this?.let { "${it.format()}°" } ?: "—"

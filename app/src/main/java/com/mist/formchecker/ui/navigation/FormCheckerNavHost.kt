@@ -13,6 +13,7 @@ import com.mist.formchecker.ui.screen.HomeScreen
 import com.mist.formchecker.ui.screen.SessionSummaryScreen
 import com.mist.formchecker.ui.screen.SettingsScreen
 import com.mist.formchecker.ui.screen.SplashScreen
+import com.mist.formchecker.ui.screen.workout.ExerciseScreen
 import com.mist.formchecker.ui.screen.workout.WorkoutScreen
 
 @Composable
@@ -40,9 +41,22 @@ fun FormCheckerNavHost(
         composable<Home> {
             HomeScreen(
                 onStartWorkout = { navController.navigate(Workout) },
+                onOpenWorkoutLab = { navController.navigate(WorkoutLab) },
                 onOpenCapture = { navController.navigate(Capture) },
                 onOpenHistory = { navController.navigate(History) },
                 onOpenSettings = { navController.navigate(Settings) },
+            )
+        }
+
+        composable<WorkoutLab> {
+            // 개발·검증용. 수치가 전부 올라간다.
+            WorkoutScreen(
+                onFinish = { sessionId ->
+                    navController.navigate(SessionSummary(sessionId)) {
+                        popUpTo<WorkoutLab> { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -51,7 +65,8 @@ fun FormCheckerNavHost(
         }
 
         composable<Workout> {
-            WorkoutScreen(
+            // 사용자용. 판정은 개발 화면과 같은 ViewModel이 한다.
+            ExerciseScreen(
                 onFinish = { sessionId ->
                     // 결과 화면에서 뒤로 가기를 눌렀을 때 다시 운동 화면(카메라)으로
                     // 돌아가면 안 되므로, Workout을 백스택에서 걷어내고 교체한다.

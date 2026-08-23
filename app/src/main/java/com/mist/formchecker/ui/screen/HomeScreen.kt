@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 @Composable
 fun HomeScreen(
     onStartWorkout: () -> Unit,
+    onOpenWorkoutLab: () -> Unit,
     onOpenCapture: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -20,6 +21,8 @@ fun HomeScreen(
         actions = listOf(
             PlaceholderAction(label = "운동 시작", emphasized = true, onClick = onStartWorkout),
             PlaceholderAction(label = "기준 자세 수집", onClick = onOpenCapture),
+            // 개발·검증용. 판정은 "운동 시작"과 같고 수치가 더 보인다.
+            PlaceholderAction(label = "운동 (개발용 수치)", onClick = onOpenWorkoutLab),
             PlaceholderAction(label = "기록 보기", onClick = onOpenHistory),
             PlaceholderAction(label = "설정", onClick = onOpenSettings),
         ),

@@ -13,7 +13,8 @@
 - **의존성**: Hilt, Room(KSP + `room.schemaLocation`), WorkManager, CameraX, kotlinx-serialization, Navigation(타입 안전 `@Serializable` 라우트) 전부 추가·배선됨
 - **모듈**: `:pose-engine` 분리 완료 (UI와 독립된 ML·판정 계층)
 - **추론 모델**: `app/src/main/assets/`에 두 개. **기본은 RTMPose-s Halpe26(26 keypoint)**이고 MoveNet Lightning(17 keypoint, COCO)은 비교용으로만 남아 있습니다. MoveNet에는 발 키포인트가 없어 뒤꿈치 들림·발끝 정렬을 아예 계산할 수 없습니다 — **새 판정을 추가할 때 MoveNet 경로를 가정하지 마세요.**
-- **화면**: Workout(카메라·판정·rep 카운팅·기준 자세 캘리브레이션), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·동기화 대기 배지) 완성. Splash·Home 있음
+- **화면**: Exercise(사용자용 운동), WorkoutLab(개발·검증용 운동), Capture(데이터 수집, CSV/JSONL 내보내기 + 세션 목록·삭제), SessionSummary(자세 피드백 리포트·rep 목록·성능 카드), History(세션 목록·업로드 대기 배지) 완성. Splash·Home 있음
+- **운동 화면이 두 벌입니다**: `ExerciseScreen`(사용자용)과 `WorkoutScreen`(개발용)이 **`WorkoutViewModel` 하나를 공유**합니다 — 동작은 같고 표시만 다릅니다. 개발 화면에는 관절 각도·정규화 원값·추론 지연·모델 전환이 올라가 있고, 새 판정을 추가할 때 기기에서 확인하는 자리입니다. **판정 로직을 화면에 넣지 마세요** — 넣으면 두 화면이 다른 답을 냅니다. 공용 UI는 `WorkoutControls.kt`
 - **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
 - **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉으실 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
 - **사용자 문구**: `rep`·`패럴렐`·`valgus` 같은 용어와 임계값 숫자를 화면에 쓰지 않습니다. 용어 매핑은 `FeedbackLabels` 한 곳에 있고 세 화면이 공유합니다 (설계문서 5.2절). **새 문구를 넣을 때 enum 이름이 그대로 나가지 않는지 확인하세요** — `SIDE`·`SHALLOW`가 화면에 찍히고 있었습니다
