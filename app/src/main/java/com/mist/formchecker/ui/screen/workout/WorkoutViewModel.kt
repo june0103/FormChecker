@@ -873,7 +873,16 @@ class WorkoutViewModel @Inject constructor(
         val usable = StandingCalibration.REQUIRED.all {
             result.pose.isReliable(it, StandingCalibration.MIN_CONFIDENCE)
         }
-        if (!usable) {
+        // **준비 자세를 통과해야 3초를 센다.**
+        //
+        // 예전에는 관절만 보였으면 3초를 세고 **끝난 뒤에** 실패를 알렸다 — 45도로 서
+        // 있으면 3초를 기다린 다음 "비스듬해요"를 들었다. 기다렸다 실패하는 것이 가장
+        // 나쁜 순서다. 조건이 어긋나면 창을 채우지 않고 왜 안 세는지만 보여준다.
+        //
+        // 막는 항목은 근거가 확실한 것만이다 — 발 간격 허용폭은 잠정값이라 안내만 한다
+        // ([ReadyIssue.blocking]).
+        val postureReady = _uiState.value.readyPosture.readyToMeasure
+        if (!usable || !postureReady) {
             calibrationFrames.clear()
             calibrationStartMs = null
             _uiState.update { it.copy(calibrationRemainingMs = CALIBRATION_DURATION_MS) }

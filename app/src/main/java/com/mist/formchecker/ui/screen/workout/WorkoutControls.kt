@@ -372,11 +372,18 @@ internal fun CalibrationBar(
 
             CalibrationStage.COLLECTING -> {
                 val seconds = (state.calibrationRemainingMs + 999) / 1000
+                // 준비 자세가 어긋나 있으면 **3초가 돌지 않는다.** 그때 "그대로 계세요"를
+                // 띄우면 사용자는 그대로 서서 아무 일도 일어나지 않는 것을 본다.
+                val waiting = !state.readyPosture.readyToMeasure
                 InfoNote(notes) {
                     Text(
-                        text = "그대로 계세요 — ${seconds}초",
+                        text = if (waiting) {
+                            "자세를 맞추면 3초를 셀게요"
+                        } else {
+                            "그대로 계세요 — ${seconds}초"
+                        },
                         style = MaterialTheme.typography.titleLarge,
-                        color = LimeGreen,
+                        color = if (waiting) FeedbackWarning else LimeGreen,
                     )
                 }
                 if (!collapseDetails) {
