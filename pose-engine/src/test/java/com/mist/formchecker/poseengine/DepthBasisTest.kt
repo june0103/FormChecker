@@ -575,47 +575,6 @@ class DepthBasisTest {
     }
 
     /**
-     * 대표값 하나는 두 방향을 동시에 낼 수 없다.
-     *
-     * ## 왜 이걸 고정하는가
-     * 무릎 정렬은 프레임 단위로 판정할 수 있지만, **rep 전체에서 아무 프레임이나 임계값을
-     * 넘으면 경고로 쓰면 한 rep에 "모임"과 "벌어짐"이 함께 뜬다.** 얕은 구간에서 무릎이
-     * 아직 발끝보다 뒤에 있어 2D에서 안쪽으로 읽히기 때문이다 — 실측 정면 12세션에서
-     * 하강 앞 50%는 모임 39%/벌어짐 7%, 최저점은 모임 19%/벌어짐 37%로 대칭으로 튀었다.
-     *
-     * 그래서 상위 계층은 **최저점 대표값 하나**로 재판정한다. 그러면 이 테스트가 보장하는
-     * 배타성 때문에 두 방향이 섞일 수 없다 — 실측 12세션 전부 한 방향이었고, 두 방향이
-     * 같은 rep에 함께 나온 rep은 240개 중 0개였다.
-     *
-     * ## 국면으로 나누지 않은 이유
-     * "앉을 때 벌어지고 일어날 때 모인다"를 실측으로 확인했지만 **한 사람의 편차는 rep 내내
-     * 거의 변하지 않았다** — 하강→상승 변화 중앙값 +0.006(허용폭 0.10의 1/16). 국면으로
-     * 나누면 자세가 아니라 위의 투영 잔차를 보고하게 된다.
-     */
-    @Test
-    fun `대표값 하나는 모임과 벌어짐을 동시에 내지 않는다`() {
-        val samples = listOf(-0.30f, -0.11f, -0.10f, -0.05f, 0f, 0.05f, 0.10f, 0.11f, 0.30f)
-
-        for (deviation in samples) {
-            val alignment = thresholds.kneeAlignmentByToe(deviation)
-            assertNotNull("대표값이 있으면 판정이 나와야 한다", alignment)
-            // 세 상태 중 정확히 하나다. VALGUS와 FLARED가 함께 나올 길이 없다.
-            assertTrue(
-                "편차 $deviation 이 알 수 없는 상태를 냈다",
-                alignment == KneeAlignment.VALGUS ||
-                    alignment == KneeAlignment.FLARED ||
-                    alignment == KneeAlignment.GOOD,
-            )
-        }
-
-        // 경계 바깥에서만 방향이 갈린다.
-        assertEquals(KneeAlignment.VALGUS, thresholds.kneeAlignmentByToe(0.11f))
-        assertEquals(KneeAlignment.FLARED, thresholds.kneeAlignmentByToe(-0.11f))
-        assertEquals(KneeAlignment.GOOD, thresholds.kneeAlignmentByToe(0.10f))
-        assertEquals(KneeAlignment.GOOD, thresholds.kneeAlignmentByToe(-0.10f))
-    }
-
-    /**
      * 측면에서는 판정하지 않는다. 좌우 간격이 카메라 축 방향이라 무릎·발끝이 겹쳐
      * 값이 무의미해진다.
      */

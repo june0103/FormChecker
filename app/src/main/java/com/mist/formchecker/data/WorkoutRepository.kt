@@ -7,6 +7,8 @@ import com.mist.formchecker.data.local.SessionListItem
 import com.mist.formchecker.data.local.WorkoutDao
 import com.mist.formchecker.data.local.WorkoutSessionEntity
 import com.mist.formchecker.data.local.WorkoutSetEntity
+import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.RepScore
 import java.util.UUID
 import javax.inject.Inject
@@ -33,6 +35,8 @@ data class CompletedRepInput(
     val validFrameRatio: Float,
     /** 무릎 편차가 가장 컸던 쪽. 사람 기준 좌/우. */
     val kneeToeSide: String?,
+    /** 경고 종류별로 문제가 났던 구간. */
+    val warningPhases: Map<FormWarning, Set<RepPhase>>,
 )
 
 /** 세션 성능 지표. 없으면(프레임을 한 장도 못 돌린 경우) null로 넘긴다. */
@@ -138,5 +142,6 @@ class WorkoutRepository @Inject constructor(
         maxTorsoLeanDegrees = maxTorsoLeanDegrees,
         validFrameRatio = validFrameRatio,
         kneeToeSide = kneeToeSide,
+        warningPhases = ErrorFlags.encodePhases(warningPhases),
     )
 }

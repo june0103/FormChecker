@@ -21,6 +21,7 @@ import com.mist.formchecker.poseengine.DepthSummary
 import com.mist.formchecker.poseengine.Finding
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.NotJudged
+import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.SessionReport
 import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -167,25 +168,47 @@ private fun Finding.advice(): String {
         Side.RIGHT -> "오른쪽 "
         null -> ""
     }
+    // 구간을 아는 경우에만 붙인다. 모르면(예전 기록) 침묵한다 — 없는 정보를 지어내는
+    // 것보다 낫다.
+    val when_ = phase.label()
+
     return when (warning) {
         FormWarning.KNEE_VALGUS ->
-            "앉으실 때 ${where}무릎이 안쪽으로 모여요. " +
-                "무릎을 발끝 방향으로 밀어내면서 내려가 보세요."
+            "${when_}${where}무릎이 안쪽으로 모여요. " +
+                "무릎을 발끝 방향으로 밀어내면서 움직여 보세요."
 
         FormWarning.KNEE_FLARED ->
-            "앉으실 때 ${where}무릎이 발끝보다 바깥으로 벌어져요. " +
+            "${when_}${where}무릎이 발끝보다 바깥으로 벌어져요. " +
                 "무릎을 발끝 방향에 맞춰 주세요."
 
         FormWarning.SHALLOW_DEPTH ->
             "조금 더 깊게 앉아 주세요. 엉덩이가 무릎 높이까지 내려오면 딱 좋아요."
 
         FormWarning.EXCESSIVE_LEAN ->
-            "내려갈 때 상체가 많이 앞으로 숙여져요. " +
-                "가슴을 들고 시선은 앞을 보면서 앉아 보세요."
+            "${when_.ifEmpty { "내려갈 때 " }}상체가 많이 앞으로 숙여져요. " +
+                "가슴을 들고 시선은 앞을 보면서 움직여 보세요."
 
         FormWarning.HIP_SHIFT ->
-            "체중이 한쪽 발로 쏠려요. 양발에 고르게 실으면서 앉아 주세요."
+            "${when_}체중이 한쪽 발로 쏠려요. 양발에 고르게 실어 주세요."
     }
+}
+
+/**
+ * 언제 그랬는지. 문장 앞에 붙는다.
+ *
+ * ## 왜 구간을 말하는가
+ * "무릎이 모여요"와 "무릎이 벌어져요"가 한 세션에 함께 나올 수 있다 — 내려갈 때와 올라올
+ * 때가 다른 사람이 있다. **언제인지를 말하지 않으면 둘 중 무엇을 언제 고쳐야 하는지 알 수
+ * 없다.** 둘 다 실제로 일어난 일이고, 구간이 다르면 고치는 방법도 다르다.
+ *
+ * null이면 구간을 기록하지 않은 기록이다(이 기능 이전). 그때는 아무것도 붙이지 않는다.
+ */
+private fun RepPhase?.label(): String = when (this) {
+    RepPhase.DESCENDING -> "내려갈 때 "
+    RepPhase.BOTTOM -> "가장 낮은 지점에서 "
+    RepPhase.ASCENDING -> "올라올 때 "
+    RepPhase.THROUGHOUT -> "동작 내내 "
+    null -> ""
 }
 
 /**

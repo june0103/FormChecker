@@ -25,6 +25,7 @@ import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngineHandle
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepFrame
+import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.RepStateMachine
 import com.mist.formchecker.poseengine.RepSummary
@@ -325,41 +326,25 @@ class WorkoutViewModel @Inject constructor(
     private val repWarnings = mutableSetOf<FormWarning>()
 
     /**
-     * 이 rep에서 **가장 깊게 앉았던 프레임**의 무릎–발끝 편차와 그 쪽.
+     * 이 rep에서 무릎 편차가 가장 컸던 쪽과 그 크기.
      *
-     * ## 왜 가장 깊은 프레임인가 (가장 큰 편차가 아니라)
-     * 무릎 정렬은 프레임 단위로 판정할 수 있지만, **rep을 대표하는 값은 최저점의 것**이다.
-     * 구간 중 아무 프레임이나 임계값을 넘으면 경고로 쓰면 얕은 구간의 투영 잔차가 섞인다.
-     *
-     * 실측 정면 12세션에서 그 잔차가 뚜렷했다 — 깊이 게이트를 갓 넘은 구간에서 무릎이
-     * 아직 발끝보다 뒤에 있어 2D에서 안쪽으로 읽힌다.
-     *
-     * | 구간 | 모임 판정 | 벌어짐 판정 |
-     * |---|---|---|
-     * | 하강 앞 50% | **39%** | 7% |
-     * | 최저점 | 19% | 37% |
-     * | 상승 뒤 50% | **36%** | 8% |
-     *
-     * 얕은 두 구간이 대칭으로 튄다. 그래서 프레임 누적으로 판정하면 **한 세션에 "무릎
-     * 모임"과 "무릎 벌어짐"이 함께 뜨고**, 사용자는 언제 무엇이 문제인지 알 수 없다.
-     *
-     * 최저점 대표값으로 판정하면 그 현상이 사라진다 — 실측 12세션 전부 한 방향이었고,
-     * 두 방향이 같은 rep에 함께 나온 rep은 240개 중 **0개**였다.
-     *
-     * ## 국면으로 나누지 않는 이유
-     * "앉을 때 벌어지고 일어날 때 모인다"를 검증했지만 **한 사람의 편차는 rep 내내 거의
-     * 변하지 않았다** — 하강→상승 변화 중앙값 +0.006(허용폭 0.10의 1/16), 방향도 12명 중
-     * 8명만 같았다. 국면으로 나누면 자세가 아니라 위 표의 투영 잔차를 보고하게 된다.
+     * 프레임마다 좌우 중 나쁜 쪽이 바뀔 수 있으므로 **구간 전체에서 가장 큰 편차**가 나온
+     * 쪽을 쓴다. 마지막 프레임의 쪽을 쓰면 상승 중 흔들림이 결론을 바꾼다.
      */
-    private var repDeepestKnee: KneeAtBottom? = null
+    private var repWorstKnee: Pair<Side, Float>? = null
 
     /**
-     * [repDeepestKnee]가 담는 것. 세 값이 **같은 프레임**에서 나와야 한다.
+     * 이 rep에서 경고 종류별로 문제가 났던 구간.
      *
-     * [side]가 nullable인 이유: 그 프레임의 정렬이 GOOD이면 분석기가 쪽을 남기지 않는다.
-     * 경고가 없으면 쪽도 쓸 일이 없으므로 그대로 둔다.
+     * ## 왜 구간을 남기는가
+     * "무릎이 모여요"와 "무릎이 벌어져요"가 한 rep에 함께 날 수 있다. **언제인지를 말하지
+     * 않으면 사용자는 둘 중 무엇을 언제 고쳐야 하는지 알 수 없다** — 내려갈 때 벌어지는
+     * 것과 올라올 때 모이는 것은 고치는 방법이 다르다.
+     *
+     * 프레임 수가 아니라 **구간 집합**을 담는다. 구간마다 길이가 달라 프레임 수로 세면
+     * 긴 구간이 항상 이긴다.
      */
-    private data class KneeAtBottom(val depth: Float, val side: Side?, val deviation: Float)
+    private val repWarningPhases = mutableMapOf<FormWarning, MutableSet<RepPhase>>()
 
     /** 준비 시간 카운트다운. 취소·재시작·화면 이탈 시 반드시 끊어야 한다. */
     private var prepJob: Job? = null
@@ -488,31 +473,29 @@ class WorkoutViewModel @Inject constructor(
             repMaxDepthRatio = null
             repMaxShinDepth = null
             repWarnings.clear()
-            repDeepestKnee = null
+            repWorstKnee = null
+            repWarningPhases.clear()
         }
         // rep 구간 안이면 경고를 모은다. 선 자세·미인식 구간의 경고는 그 rep의 자세가
         // 아니므로 넣지 않는다. Completed가 뜬 프레임은 이미 STANDING으로 넘어가 있지만,
         // 그 직전 ASCENDING 프레임들이 이미 반영돼 있어 놓치는 것이 없다.
         if (stateMachine.state in REP_PHASES) {
             repWarnings += form.warnings
-            // 무릎은 가장 깊은 프레임의 값만 남긴다. 깊이는 무릎의 좌우 이동과 무관한
-            // 세로 거리라 이 비교가 판정 대상에 오염되지 않는다.
-            //
-            // ⚠ 쪽(`kneeToeSide`)을 조건에 넣으면 안 된다. 그 값은 정렬이 GOOD이면 null이라
-            // (SquatFormAnalyzer 참고), 조건에 넣으면 **이미 경고가 난 프레임만** 추적하게
-            // 된다. 그러면 최저점이 정상이어도 얕은 구간의 잔차가 대표값이 되어, 없애려던
-            // 오탐이 그대로 남는다.
+            // 어느 구간에서 났는지 함께 남긴다. 같은 rep에서 두 방향이 다른 구간에 나면
+            // 리포트가 "내려갈 때 벌어지고, 올라올 때 모여요"라고 말할 수 있다.
+            phaseOf(stateMachine.state)?.let { phase ->
+                for (warning in form.warnings) {
+                    repWarningPhases.getOrPut(warning) { mutableSetOf() } += phase
+                }
+            }
+            // 편차의 절대값이 가장 컸던 프레임의 쪽을 남긴다.
+            val side = form.kneeToeSide
             val deviation = form.kneeToeDeviation
-            val depth = features?.shinDepthRatio
-            if (deviation != null && depth != null &&
-                depth > (repDeepestKnee?.depth ?: Float.NEGATIVE_INFINITY)
-            ) {
-                repDeepestKnee = KneeAtBottom(
-                    depth = depth,
-                    // 최저점이 정상이면 쪽이 없다. 그때는 경고도 없으니 쓸 일이 없다.
-                    side = form.kneeToeSide,
-                    deviation = deviation,
-                )
+            if (side != null && deviation != null) {
+                val magnitude = abs(deviation)
+                if (magnitude > (repWorstKnee?.second ?: 0f)) {
+                    repWorstKnee = side to magnitude
+                }
             }
         }
         form.depthRatio?.let { ratio ->
@@ -593,20 +576,7 @@ class WorkoutViewModel @Inject constructor(
         depth: DepthLevel?,
         basis: DepthBasis?,
     ) {
-        // 무릎 경고는 프레임 누적을 쓰지 않고 최저점 대표값으로 다시 판정한다.
-        // 얕은 구간의 투영 잔차 때문에 한 rep에 두 방향이 섞이기 때문이다
-        // (repDeepestKnee 주석의 실측 표 참고).
-        val kneeAtBottom = repDeepestKnee
-        val kneeAlignment = config.form.kneeAlignmentByToe(kneeAtBottom?.deviation)
-        val warnings = repWarnings
-            .minus(setOf(FormWarning.KNEE_VALGUS, FormWarning.KNEE_FLARED))
-            .plus(
-                when (kneeAlignment) {
-                    KneeAlignment.VALGUS -> setOf(FormWarning.KNEE_VALGUS)
-                    KneeAlignment.FLARED -> setOf(FormWarning.KNEE_FLARED)
-                    else -> emptySet()
-                },
-            )
+        val warnings = repWarnings.toSet()
         // 깊이 경고는 프레임이 아니라 rep 최저점으로 판정한다. 프레임 단위 경고를 그대로
         // 쓰면 하강 중 잠깐 SHALLOW였던 것이 남는데, 그건 지나가는 중이었을 뿐이다.
         val repLevelWarnings = warnings.minus(FormWarning.SHALLOW_DEPTH) +
@@ -632,10 +602,8 @@ class WorkoutViewModel @Inject constructor(
             minKneeAngle = summary.aggregate.minKneeAngle,
             maxTorsoLeanDegrees = summary.aggregate.maxTorsoLeanDegrees,
             validFrameRatio = summary.aggregate.validFrameRatio,
-            // 정렬이 정상이면 쪽을 남기지 않는다 — 경고가 없는데 쪽이 붙으면
-            // 리포트가 "왼쪽 무릎이"로 시작하는 문장을 만든다.
-            kneeToeSide = kneeAtBottom?.side?.name
-                ?.takeIf { kneeAlignment != null && kneeAlignment != KneeAlignment.GOOD },
+            kneeToeSide = repWorstKnee?.first?.name,
+            warningPhases = repWarningPhases.mapValues { it.value.toSet() },
         )
     }
 
@@ -1011,6 +979,14 @@ class WorkoutViewModel @Inject constructor(
 
     private companion object {
         /** rep 구간으로 취급하는 상태. 선 자세·미인식은 rep 밖이다. */
+        /** 상태머신 상태를 리포트가 쓰는 구간으로 옮긴다. rep 밖이면 null이다. */
+        private fun phaseOf(state: RepState): RepPhase? = when (state) {
+            RepState.DESCENDING -> RepPhase.DESCENDING
+            RepState.BOTTOM -> RepPhase.BOTTOM
+            RepState.ASCENDING -> RepPhase.ASCENDING
+            RepState.IDLE, RepState.STANDING -> null
+        }
+
         private val REP_PHASES = setOf(
             RepState.DESCENDING, RepState.BOTTOM, RepState.ASCENDING,
         )

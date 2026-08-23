@@ -17,7 +17,7 @@
 - **결과 화면도 짝입니다**: `SessionSummary(sessionId, diagnostics)` — 개발용 운동에서 끝내면 성능 카드가 켜지고, 사용자용에서는 꺼집니다. 화면 전체가 하나의 `LazyColumn`이고 "홈으로" 버튼만 스크롤 밖에 고정입니다 — **고정 높이 카드를 쌓지 마세요**, 피드백이 길어지면 해상도에 따라 버튼이 잘립니다
 - **운동 화면이 두 벌입니다**: `ExerciseScreen`(사용자용)과 `WorkoutScreen`(개발용)이 **`WorkoutViewModel` 하나를 공유**합니다 — 동작은 같고 표시만 다릅니다. 개발 화면에는 관절 각도·정규화 원값·추론 지연·모델 전환이 올라가 있고, 새 판정을 추가할 때 기기에서 확인하는 자리입니다. **판정 로직을 화면에 넣지 마세요** — 넣으면 두 화면이 다른 답을 냅니다. 공용 UI는 `WorkoutControls.kt`
 - **저장**: Room 4테이블(`workout_sessions`/`workout_sets`/`rep_records`/`performance_metrics`) + `sync_status`. 스키마 v2, `app/schemas`에 export. **점수 대신 사실을 저장합니다** — `form_score`는 항상 null이고 `checked_count`/`warned_count`로 대체 (설계문서 4.1절)
-- **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "앉으실 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
+- **세션 리포트**: `SessionReporter`가 rep 사실을 모아 "내려갈 때 왼쪽 무릎이 안쪽으로 모여요" 같은 문장을 낸다. **구간(내려갈 때/가장 낮은 지점/올라올 때)을 함께 말한다** — 두 방향이 다른 구간에 나면 각각 그 구간으로 보고한다. 규칙은 설계문서 5.1절 — 점수 없음, 빈도순, 분모는 항목별, **못 본 것을 반드시 말함**
 - **사용자 문구**: `rep`·`패럴렐`·`valgus` 같은 용어와 임계값 숫자를 화면에 쓰지 않습니다. 용어 매핑은 `FeedbackLabels` 한 곳에 있고 세 화면이 공유합니다 (설계문서 5.2절). **새 문구를 넣을 때 enum 이름이 그대로 나가지 않는지 확인하세요** — `SIDE`·`SHALLOW`가 화면에 찍히고 있었습니다
 - **판정 5종**: 깊이 부족·상체 숙임(측면) / 무릎 valgus·flared·골반 쏠림(정면). `CameraAngle.supportedChecks`가 각도별로 켜고 끕니다
 - **분석 도구**: `tools/analysis/`에 `check_sessions.py`(촬영 당일 사용 가능 판정), `reference_range.py`, `variance_split.py`

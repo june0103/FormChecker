@@ -68,6 +68,7 @@ private fun RepRecordEntity.toReported(): ReportedRep? {
         depthLevel = depthLevel?.let { runCatching { DepthLevel.valueOf(it) }.getOrNull() },
         depthScore = depthScore,
         kneeToeSide = kneeToeSide?.let { runCatching { Side.valueOf(it) }.getOrNull() },
+        warningPhases = ErrorFlags.decodePhases(warningPhases),
     )
 }
 

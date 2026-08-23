@@ -2,6 +2,7 @@ package com.mist.formchecker.data.local
 
 import androidx.room.TypeConverter
 import com.mist.formchecker.poseengine.FormWarning
+import com.mist.formchecker.poseengine.RepPhase
 import kotlinx.serialization.json.Json
 
 /** Room이 enum을 문자열로 저장하게 한다. ordinal을 쓰면 enum 순서를 바꿀 때 과거 행이 깨진다. */
@@ -39,6 +40,32 @@ object ErrorFlags {
     fun decode(raw: String): Map<String, Boolean> = runCatching {
         json.decodeFromString<Map<String, Boolean>>(raw)
     }.getOrDefault(emptyMap())
+
+    /**
+     * 경고별 구간을 `{"knee_flared":["DESCENDING","BOTTOM"]}` 형태로 담는다.
+     *
+     * `error_flags`와 같은 키 표기를 쓴다 — 두 컬럼이 같은 경고를 다른 이름으로 부르면
+     * 서버에서 조인할 때 매핑 표가 하나 더 필요해진다.
+     */
+    fun encodePhases(phases: Map<FormWarning, Set<RepPhase>>): String =
+        json.encodeToString(
+            phases.entries.associate { (w, p) -> keyOf(w) to p.map { it.name }.sorted() },
+        )
+
+    /** 저장된 구간을 되돌린다. 읽을 수 없으면 빈 맵 — 구간을 말하지 않게 된다. */
+    fun decodePhases(raw: String?): Map<FormWarning, Set<RepPhase>> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        val decoded = runCatching {
+            json.decodeFromString<Map<String, List<String>>>(raw)
+        }.getOrDefault(emptyMap())
+        return FormWarning.entries.mapNotNull { warning ->
+            decoded[keyOf(warning)]
+                ?.mapNotNull { name -> runCatching { RepPhase.valueOf(name) }.getOrNull() }
+                ?.toSet()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { warning to it }
+        }.toMap()
+    }
 
     /** 경고가 난 종류만. 화면에 나열할 때 쓴다. */
     fun warned(raw: String): List<FormWarning> {

@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RepRecordEntity::class,
         PerformanceMetricsEntity::class,
     ],
-    version = 2,
+    version = 3,
 )
 @TypeConverters(Converters::class)
 abstract class FormCheckerDatabase : RoomDatabase() {
@@ -47,6 +47,18 @@ abstract class FormCheckerDatabase : RoomDatabase() {
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE rep_records ADD COLUMN knee_toe_side TEXT")
+            }
+        }
+
+        /**
+         * 경고가 rep의 어느 구간에서 났는지 남긴다.
+         *
+         * 기존 행은 null이고, 리포트는 그때 구간을 말하지 않는다 — 없는 정보를 지어내는
+         * 것보다 침묵이 낫다.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE rep_records ADD COLUMN warning_phases TEXT")
             }
         }
     }
