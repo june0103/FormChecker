@@ -202,7 +202,7 @@ private fun PerformanceCard(metrics: PerformanceMetricsEntity) {
 /**
  * 동작 한 줄. 판정 사실만 적는다.
  *
- * `checked_count`가 0이면 **"확인 못 함"으로 명시한다** — "짚은 곳 없음"과 재지 못한 것이
+ * `checked_count`가 0이면 **"확인 못 함"으로 명시한다** — "피드백 없음"과 재지 못한 것이
  * 같아 보이면 안 된다 (설계문서 4.2절).
  */
 @Composable
@@ -241,7 +241,7 @@ private fun RepRow(rep: RepRecordEntity) {
                 Text(
                     when {
                         rep.checkedCount == 0 -> "확인 못 함"
-                        warned.isEmpty() -> "짚은 곳 없음"
+                        warned.isEmpty() -> "피드백 없음"
                         else -> warned.joinToString(", ") { FeedbackLabels.shortName(it) }
                     },
                     style = MaterialTheme.typography.bodySmall,
