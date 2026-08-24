@@ -1,10 +1,13 @@
 package com.mist.formchecker.ui.screen.workout
 
 import android.app.Application
+import android.content.Context
+import android.media.AudioManager
 import androidx.camera.core.CameraSelector
 import androidx.lifecycle.AndroidViewModel
 import android.os.Build
 import androidx.lifecycle.viewModelScope
+import com.mist.formchecker.audio.AudioCues
 import com.mist.formchecker.data.CompletedRepInput
 import com.mist.formchecker.data.SessionMetricsInput
 import com.mist.formchecker.data.WorkoutRepository
@@ -167,6 +170,21 @@ data class WorkoutUiState(
      * "발이 좁았어요"라고 말하면 사용자는 이미 스쿼트를 시작한 뒤다.
      */
     val readyPosture: ReadyPosture = ReadyPosture.EMPTY,
+    /**
+     * 미디어 볼륨이 0인가.
+     *
+     * ## 왜 상태로 두는가
+     * 소리가 이 화면의 **주 피드백 채널**이다 — 폰을 세워두고 떨어져 서면 횟수 말고는
+     * 글씨가 읽히지 않는다. 그런데 톤은 `STREAM_MUSIC`으로 나가므로 미디어 볼륨이 0이면
+     * 아무 소리도 안 난다.
+     *
+     * 그 상태를 알리지 않으면 사용자는 **기능이 고장난 것으로 읽는다.** 실제로 개발 기기의
+     * 미디어 볼륨이 0이어서 톤을 넣고도 들리지 않는 상황을 겪었다.
+     *
+     * 볼륨을 앱이 올리지는 않는다 — 사용자 기기 설정이고, 조용히 소리를 키우는 앱은
+     * 더 나쁘다.
+     */
+    val soundMuted: Boolean = false,
     val calibrationProblems: List<StandingCalibration.Problem> = emptyList(),
     /**
      * 측면에서 카메라에 가까운 쪽. 캘리브레이션에서 정하고 그 뒤 바꾸지 않는다.
@@ -314,6 +332,18 @@ class WorkoutViewModel @Inject constructor(
     private val feedbackHold = FeedbackHold()
 
     /**
+     * 소리 신호.
+     *
+     * ## 왜 필요한가
+     * 이 화면은 폰을 세워두고 몇 걸음 떨어져 쓴다. 그 거리에서 **횟수 말고는 글씨가 읽히지
+     * 않는다**(`기술선택_기록.md` 57번). 세어졌는지, 자세에 문제가 있었는지를 소리로 알 수
+     * 있어야 한다 — 수집 화면이 같은 이유로 이미 쓰고 있다.
+     *
+     * 아무 스레드에서 불러도 된다([AudioCues] 참고).
+     */
+    private val cues = AudioCues()
+
+    /**
      * 사용자가 촬영 방향을 직접 골랐나. **개발 화면에서만 참이 된다.**
      *
      * 사용자용 화면은 방향 선택 버튼을 없앴고 판별은 자동이다. 그런데 개발 화면에는 각도
@@ -423,6 +453,9 @@ class WorkoutViewModel @Inject constructor(
     private val calibrationFrames = mutableListOf<Pair<Pose, Float>>()
     private var calibrationStartMs: Long? = null
 
+    /** 마지막으로 울린 카운트다운 초. 같은 초에 두 번 울리지 않게 한다. */
+    private var lastCountdownSecond = Int.MAX_VALUE
+
     /**
      * 준비 자세 점검용 최근 프레임. **캘리브레이션 창과 별개로 돈다.**
      *
@@ -438,6 +471,8 @@ class WorkoutViewModel @Inject constructor(
     private val readyFrames = ArrayDeque<Pair<Pose, Float>>()
 
     init {
+        // 화면에 들어온 시점에 한 번. 걸어가기 전에 알아야 볼륨을 올릴 수 있다.
+        refreshSoundMuted()
         loadEngine()
     }
 
@@ -698,6 +733,22 @@ class WorkoutViewModel @Inject constructor(
         val repLevelWarnings = warnings.minus(FormWarning.SHALLOW_DEPTH) +
             setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { depth == DepthLevel.SHALLOW })
 
+        // **소리는 rep이 끝날 때만 낸다.**
+        //
+        // 프레임 단위 경고가 뜰 때마다 울리면 한 rep에서 여러 번 난다 — 깊이·상체·무릎이
+        // 각각 걸리면 세 번이다. 그리고 톤은 "무엇이" 문제인지 말할 수 없으므로 동작
+        // 중간에 울려도 지금 고칠 수 있는 정보를 주지 않는다.
+        //
+        // rep 끝에 한 번, 대신 **세어졌다와 문제가 있었다를 한 소리에 담는다**
+        // ([AudioCues.Cue.REP_WARNED]).
+        cues.play(
+            if (repLevelWarnings.isEmpty()) {
+                AudioCues.Cue.REP_DONE
+            } else {
+                AudioCues.Cue.REP_WARNED
+            },
+        )
+
         completedReps += CompletedRepInput(
             repNumber = summary.repIndex,
             // rep이 방금 끝났으므로 지금 시각이 그 시각이다. summary의 타임스탬프는 프레임
@@ -748,6 +799,9 @@ class WorkoutViewModel @Inject constructor(
             null
         }
 
+        // 종료 신호. 사용자가 버튼을 누른 뒤 화면이 바뀌기까지 저장이 끼는데, 그 사이에
+        // 아무 반응이 없으면 눌린 줄 모르고 다시 누른다.
+        cues.play(AudioCues.Cue.SESSION_END)
         viewModelScope.launch {
             val id = repository.saveSession(
                 startedAtMs = sessionStartedAtMs,
@@ -812,9 +866,17 @@ class WorkoutViewModel @Inject constructor(
         // 준비 구간에는 사람이 화면 밖에 있어 프레임이 안 들어올 수 있다.
         prepJob = viewModelScope.launch {
             var remaining = prepMs
+            var lastSecond = secondsOf(prepMs)
             while (remaining > 0) {
                 delay(CalibrationPrep.TICK_MS)
                 remaining -= CalibrationPrep.TICK_MS
+                // 초가 바뀔 때마다 한 번. 사용자는 폰을 등지고 걸어가는 중이라 화면의
+                // 숫자를 볼 수 없다 — 셀프타이머가 소리를 내는 것과 같은 이유다.
+                val second = secondsOf(remaining)
+                if (second < lastSecond) {
+                    cues.play(AudioCues.Cue.COUNTDOWN)
+                    lastSecond = second
+                }
                 _uiState.update {
                     it.copy(calibrationPrepRemainingMs = remaining.coerceAtLeast(0))
                 }
@@ -833,6 +895,7 @@ class WorkoutViewModel @Inject constructor(
     private fun beginCollecting() {
         calibrationFrames.clear()
         calibrationStartMs = null
+        lastCountdownSecond = Int.MAX_VALUE
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.COLLECTING,
@@ -893,6 +956,19 @@ class WorkoutViewModel @Inject constructor(
         calibrationFrames += result.pose to result.aspectRatio
         val remaining = (CALIBRATION_DURATION_MS - (result.timestampMs - start))
             .coerceAtLeast(0)
+
+        // **줄어들 때만 울린다.** 창이 리셋되면 남은 시간이 3초로 되돌아가는데(자세가
+        // 어긋났거나 관절이 안 보였을 때) 그때 울리면 자세가 경계에서 흔들릴 때마다
+        // 소리가 난다.
+        //
+        // 그래서 **소리가 안 나는 것이 "아직 안 세고 있다"는 신호**가 된다. 자세를 맞추면
+        // 틱이 시작되고, 그게 화면을 못 읽는 거리에서 유일하게 알 수 있는 방법이다.
+        val second = secondsOf(remaining)
+        if (second < lastCountdownSecond) {
+            cues.play(AudioCues.Cue.COUNTDOWN)
+        }
+        lastCountdownSecond = second
+
         _uiState.update { it.copy(calibrationRemainingMs = remaining) }
         if (remaining > 0) return
 
@@ -992,6 +1068,12 @@ class WorkoutViewModel @Inject constructor(
         // 채워져 있고, 그게 상태머신이 STANDING으로 들어가는 데 필요한 값이다. 여기서
         // 비우면 첫 rep이 창 크기만큼(약 0.25초) 늦게 잡힌다.
         startCounting()
+        // 여기서부터 센다는 것을 소리로 알린다. 이 신호를 못 들으면 사용자는 자기가
+        // 스쿼트를 시작해도 되는지 알 수 없다 — 화면의 문구는 그 거리에서 안 읽힌다.
+        cues.play(AudioCues.Cue.CALIBRATED)
+        // 소리가 실제로 중요해지는 순간이다. 여기서 다시 확인한다 — 화면에 들어온 뒤
+        // 볼륨을 내렸을 수도 있다.
+        refreshSoundMuted()
         _uiState.update {
             it.copy(
                 calibrationStage = CalibrationStage.READY,
@@ -1012,6 +1094,7 @@ class WorkoutViewModel @Inject constructor(
     }
 
     private fun failCalibration(problems: List<StandingCalibration.Problem>) {
+        cues.play(AudioCues.Cue.FAILED)
         calibrationFrames.clear()
         calibrationStartMs = null
         readyFrames.clear()
@@ -1226,8 +1309,24 @@ class WorkoutViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 미디어 볼륨이 0인지 다시 본다.
+     *
+     * 프레임마다 보지 않는다 — 오디오 서비스 조회를 30fps로 하는 것은 낭비고, 볼륨은
+     * 사용자가 버튼을 눌러야 바뀐다. 소리가 중요해지는 시점에만 확인한다.
+     */
+    private fun refreshSoundMuted() {
+        val audio = getApplication<Application>()
+            .getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val muted = audio?.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
+        if (muted != _uiState.value.soundMuted) {
+            _uiState.update { it.copy(soundMuted = muted) }
+        }
+    }
+
     override fun onCleared() {
         prepJob?.cancel()
+        cues.release()
         super.onCleared()
         engine?.close()
         engine = null
@@ -1263,6 +1362,9 @@ class WorkoutViewModel @Inject constructor(
          * 캘리브레이션 창(3초)을 그대로 쓰면 이미 고친 자세를 계속 지적한다.
          */
         const val READY_WINDOW_FRAMES = 15
+
+        /** 남은 ms를 올림한 초. 화면 표시와 같은 규칙이라 소리와 숫자가 어긋나지 않는다. */
+        fun secondsOf(remainingMs: Long): Int = ((remainingMs + 999) / 1000).toInt()
 
 
         /** 표시용 스무딩 계수. 값이 클수록 최근 프레임에 민감해진다. */
