@@ -198,8 +198,7 @@ private fun ExerciseContent(
                 state = state,
                 onStart = viewModel::startCalibration,
                 onCancel = viewModel::cancelCalibration,
-                onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
-                // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
+                    // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
                 // 떨어져 서서 쓰는 화면이라, 그 거리에서 못 읽는 글씨는 자리만 차지한다.
                 collapseDetails = true,
             )

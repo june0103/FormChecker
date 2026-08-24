@@ -32,6 +32,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
+import com.mist.formchecker.poseengine.SessionCalories
+import kotlin.math.roundToInt
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackSuccess
@@ -158,6 +160,24 @@ private fun OverviewCard(state: SessionSummaryState) {
                 color = if (state.warnedReps == 0) FeedbackSuccess else FeedbackWarning,
             )
         }
+        // 열량은 신체 정보를 넣은 사람에게만 나온다. 넣지 않은 것이 정상 상태라
+        // "없음"을 표시하지 않는다 — 안 넣은 사람에게 매번 빈 칸을 보여줄 이유가 없다.
+        //
+        // 다만 **넣었는데 계산하지 못한 경우는 말해야 한다.** 아무 말도 없으면 설정에
+        // 넣은 것이 소용없었다고 읽는다.
+        when {
+            state.calories != null -> CaloriesRow(state.calories)
+            // 깊이 의존을 없앤 뒤로는 rep이 0개일 때만 여기 온다.
+            state.hasBodyProfile && state.reps.isEmpty() -> {
+                Spacer(Modifier.height(Spacing.sm))
+                Text(
+                    "센 횟수가 없어 소모 열량을 계산하지 못했어요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FeedbackInfo,
+                )
+            }
+        }
+
         val unjudged = state.reps.size - state.judgedReps
         if (unjudged > 0) {
             Spacer(Modifier.height(Spacing.sm))
@@ -169,6 +189,40 @@ private fun OverviewCard(state: SessionSummaryState) {
             )
         }
     }
+}
+
+/**
+ * 소모 열량.
+ *
+ * ## "약"을 반드시 붙인다
+ * 문헌 두 개가 서로를 검증하는 자리까지는 왔지만(코드 주석 참고) 실측 표본이 21~29세 남성
+ * 15명이고 무산소 대사·EPOC이 빠져 있다. 소수점을 늘려 정밀해 보이게 하면 안 되고, 정수
+ * kcal로만 보여준다.
+ *
+ * ## 가정을 숨기지 않는다
+ * 나이·성별을 넣지 않으면 계산이 기본값을 쓴다. 그 사실을 말하지 않으면 사용자가 값을
+ * 실측으로 읽는다.
+ */
+@Composable
+private fun CaloriesRow(calories: SessionCalories) {
+    Spacer(Modifier.height(Spacing.sm))
+    Text(
+        text = "약 ${calories.kcal.roundToInt()} kcal 소모",
+        style = MaterialTheme.typography.titleMedium,
+        color = FeedbackSuccess,
+    )
+    Text(
+        text = buildString {
+            append("${calories.reps}번 × 1회 약 ")
+            append("%.2f".format(calories.perRepKcal))
+            append(" kcal로 계산한 어림값이에요.")
+            if (!calories.exact) {
+                append(" 설정에 나이와 성별을 넣으면 더 정확해져요.")
+            }
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = FeedbackInfo,
+    )
 }
 
 @Composable

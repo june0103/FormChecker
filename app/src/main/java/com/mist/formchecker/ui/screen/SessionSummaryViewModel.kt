@@ -2,12 +2,16 @@ package com.mist.formchecker.ui.screen
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mist.formchecker.data.AppSettings
+import com.mist.formchecker.data.BodyProfile
 import com.mist.formchecker.data.WorkoutRepository
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
 import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.WorkoutSessionEntity
+import com.mist.formchecker.poseengine.CalorieEstimate
 import com.mist.formchecker.poseengine.CameraAngle
+import com.mist.formchecker.poseengine.SessionCalories
 import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.ReportedRep
 import com.mist.formchecker.poseengine.SessionReport
@@ -27,6 +31,23 @@ data class SessionSummaryState(
     val session: WorkoutSessionEntity? = null,
     val reps: List<RepRecordEntity> = emptyList(),
     val metrics: PerformanceMetricsEntity? = null,
+    /**
+     * 소모 열량. **키·몸무게를 넣지 않았으면 null이다.**
+     *
+     * 저장하지 않고 볼 때마다 계산한다 — 공식의 상수 네 개가 전부 잠정값이라
+     * ([CalorieEstimate]) 컬럼을 만들면 되돌릴 수 없는 값이 쌓인다. rep마다 이미 저장된
+     * `depth_score`로 다시 계산되므로, 공식이 바뀌면 과거 세션도 새 값으로 보인다.
+     * `form_score`를 비워 둔 것과 같은 판단이다.
+     */
+    val calories: SessionCalories? = null,
+    /**
+     * 키·몸무게를 넣었나.
+     *
+     * 깊이 의존을 없앤 뒤로는 "넣었는데 계산 못 함"이 rep이 0개일 때만 생긴다. 그래도
+     * 남겨 둔다 — 화면이 "안 넣었다"와 구분해야 하고, 세트 개념이 생기면 rep 0개 세션이
+     * 흔해진다.
+     */
+    val hasBodyProfile: Boolean = false,
 ) {
     /** 경고가 하나라도 있던 rep 수. */
     val warnedReps: Int get() = reps.count { it.warnedCount > 0 }
@@ -53,6 +74,26 @@ data class SessionSummaryState(
 }
 
 /**
+ * 세션 열량. 신체 정보가 없거나 기록된 횟수가 없으면 null이다.
+ *
+ * **깊이를 보지 않는다** — 1회당 열량은 반복 자체에서 나오므로(문헌 근거는
+ * [CalorieEstimate] 참고) 정면으로 찍은 세션도 계산된다.
+ */
+private fun caloriesOf(
+    reps: List<RepRecordEntity>,
+    profile: BodyProfile?,
+): SessionCalories? {
+    if (profile == null) return null
+    return CalorieEstimate.forSession(
+        reps = reps.size,
+        heightCm = profile.heightCm,
+        weightKg = profile.weightKg,
+        age = profile.age,
+        sex = profile.sex,
+    )
+}
+
+/**
  * 저장된 rep 행을 리포트 입력으로 바꾼다. 문자열 컬럼을 enum으로 되돌리는 자리다.
  *
  * **각도를 못 읽으면 그 rep을 버린다**(null). 각도가 판정 항목을 정하므로, 모르는 채
@@ -75,6 +116,7 @@ private fun RepRecordEntity.toReported(): ReportedRep? {
 @HiltViewModel
 class SessionSummaryViewModel @Inject constructor(
     private val repository: WorkoutRepository,
+    private val settings: AppSettings,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SessionSummaryState())
@@ -97,10 +139,19 @@ class SessionSummaryViewModel @Inject constructor(
             combine(
                 repository.reps(sessionId),
                 repository.metrics(sessionId),
-            ) { reps, metrics -> reps to metrics }
-                .collect { (reps, metrics) ->
+                // 신체 정보를 함께 구독한다 — 설정에서 키·몸무게를 넣고 돌아오면 이 화면이
+                // 다시 열리지 않아도 열량이 채워져야 한다.
+                settings.bodyProfile,
+            ) { reps, metrics, profile -> Triple(reps, metrics, profile) }
+                .collect { (reps, metrics, profile) ->
                     _state.update {
-                        it.copy(loading = false, reps = reps, metrics = metrics)
+                        it.copy(
+                            loading = false,
+                            reps = reps,
+                            metrics = metrics,
+                            calories = caloriesOf(reps, profile),
+                            hasBodyProfile = profile != null,
+                        )
                     }
                 }
         }
