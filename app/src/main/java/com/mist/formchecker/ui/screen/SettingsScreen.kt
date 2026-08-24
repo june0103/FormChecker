@@ -43,9 +43,13 @@ import com.mist.formchecker.ui.theme.TouchTarget
  * 설정.
  *
  * ## 지금 있는 것
- * 준비 시간과 내 정보(키·몸무게·나이·성별). 준비 시간은 운동 화면에 있던 선택 줄을 옮겨 온
- * 것이다 — 매번 같은 자리에서 찍는 사람에게는 그 줄이 화면만 차지했다. 내 정보는 소모 열량을
- * 계산하기 위한 것이고, **넣지 않는 것이 정상 상태다.**
+ * 내 정보(키·몸무게·나이·성별)와 준비 시간. 내 정보는 소모 열량을 계산하기 위한 것이고,
+ * **넣지 않는 것이 정상 상태다.** 준비 시간은 운동 화면에 있던 선택 줄을 옮겨 온 것이다 —
+ * 매번 같은 자리에서 찍는 사람에게는 그 줄이 화면만 차지했다.
+ *
+ * ## 순서는 "얼마나 자주 만지나"다
+ * 내 정보가 위, 준비 시간이 아래다. 준비 시간은 한 번 정하면 거의 안 바뀌므로 위에 있으면
+ * 매번 지나쳐야 하는 줄이 된다([PrepSecondsSection]).
  *
  * ## 설명을 팝업에 넣는다
  * 항목마다 "왜 이 값을 고르나"를 문단으로 적어 두었더니 화면이 설명문 세 덩이가 됐고, 정작
@@ -88,47 +92,6 @@ fun SettingsScreen(
     ) {
         Text("설정", style = MaterialTheme.typography.headlineLarge)
 
-        SettingsSectionHeader(
-            title = "준비 시간",
-            // 왜 고를 수 있는지를 적는다. 이 값을 화면에서 설정으로 옮긴 이유가 바로
-            // "사람마다 다르지만 한 사람에게는 거의 안 바뀐다"였다.
-            detail = "기준 자세 재기를 누른 뒤 측정이 시작되기까지 기다리는 시간이에요. " +
-                "버튼을 누른 자리에서 카메라 앞까지 걸어갈 시간입니다.\n\n" +
-                "삼각대를 앞에 두고 화면에 손이 닿으면 \"바로\"가 맞고, 방 건너편에 " +
-                "두었으면 10초도 짧아요.",
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            CalibrationPrep.OPTIONS.forEach { seconds ->
-                val selected = seconds == prepSeconds
-                val label = if (seconds == 0) "바로" else "${seconds}초"
-                val modifierFor = Modifier.weight(1f).height(TouchTarget.minSize)
-                if (selected) {
-                    Button(
-                        onClick = { viewModel.selectPrepSeconds(seconds) },
-                        modifier = modifierFor,
-                    ) { Text(label, style = MaterialTheme.typography.labelMedium) }
-                } else {
-                    OutlinedButton(
-                        onClick = { viewModel.selectPrepSeconds(seconds) },
-                        modifier = modifierFor,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
-                    ) { Text(label, style = MaterialTheme.typography.labelMedium) }
-                }
-            }
-        }
-
-        if (prepSeconds == CalibrationPrep.DEFAULT_SECONDS) {
-            Text(
-                text = "기본값이에요.",
-                style = MaterialTheme.typography.labelSmall,
-                color = LimeGreen,
-            )
-        }
-
         BodyProfileSection(
             saved = bodyProfile,
             onSave = viewModel::saveBodyProfile,
@@ -136,10 +99,73 @@ fun SettingsScreen(
             onSaveSex = viewModel::saveSex,
         )
 
+        PrepSecondsSection(
+            selected = prepSeconds,
+            onSelect = viewModel::selectPrepSeconds,
+        )
+
         OutlinedButton(
             onClick = onBack,
             modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
         ) { Text("뒤로", style = MaterialTheme.typography.labelLarge) }
+    }
+}
+
+/**
+ * 준비 시간 선택.
+ *
+ * ## 왜 맨 아래인가
+ * **한 번 정하면 거의 안 바뀌는 값이다.** 삼각대 위치나 방 크기에 따라 사람마다 다르지만 한
+ * 사람에게는 계속 같다 — 그것이 애초에 이 줄을 운동 화면에서 빼낸 이유였다. 이 화면을 여는
+ * 이유는 보통 내 정보 쪽이므로, 준비 시간이 위에 있으면 매번 지나쳐야 하는 줄이 된다.
+ *
+ * 스크롤 없이 다 보이는 화면이라 순서가 접근성을 깎지도 않는다 — 더 늘어나서 스크롤이
+ * 생기면 그때는 자주 쓰는 항목이 위에 있는 편이 더 중요해진다.
+ */
+@Composable
+private fun PrepSecondsSection(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    SettingsSectionHeader(
+        title = "준비 시간",
+        // 왜 고를 수 있는지를 적는다. 이 값을 화면에서 설정으로 옮긴 이유가 바로
+        // "사람마다 다르지만 한 사람에게는 거의 안 바뀐다"였다.
+        detail = "기준 자세 재기를 누른 뒤 측정이 시작되기까지 기다리는 시간이에요. " +
+            "버튼을 누른 자리에서 카메라 앞까지 걸어갈 시간입니다.\n\n" +
+            "삼각대를 앞에 두고 화면에 손이 닿으면 \"바로\"가 맞고, 방 건너편에 " +
+            "두었으면 10초도 짧아요.",
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        CalibrationPrep.OPTIONS.forEach { seconds ->
+            val chosen = seconds == selected
+            val label = if (seconds == 0) "바로" else "${seconds}초"
+            val modifierFor = Modifier.weight(1f).height(TouchTarget.minSize)
+            if (chosen) {
+                Button(
+                    onClick = { onSelect(seconds) },
+                    modifier = modifierFor,
+                ) { Text(label, style = MaterialTheme.typography.labelMedium) }
+            } else {
+                OutlinedButton(
+                    onClick = { onSelect(seconds) },
+                    modifier = modifierFor,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
+                ) { Text(label, style = MaterialTheme.typography.labelMedium) }
+            }
+        }
+    }
+
+    if (selected == CalibrationPrep.DEFAULT_SECONDS) {
+        Text(
+            text = "기본값이에요.",
+            style = MaterialTheme.typography.labelSmall,
+            color = LimeGreen,
+        )
     }
 }
 
