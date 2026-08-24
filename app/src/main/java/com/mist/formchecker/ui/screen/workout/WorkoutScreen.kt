@@ -2,6 +2,8 @@ package com.mist.formchecker.ui.screen.workout
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,7 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
@@ -51,10 +51,10 @@ import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackInfoContainer
+import com.mist.formchecker.ui.theme.FeedbackSuccess
 import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.FeedbackWarningContainer
 import com.mist.formchecker.ui.theme.LimeGreen
-import com.mist.formchecker.ui.theme.Radius
 import com.mist.formchecker.ui.theme.RepCounterDisplay
 import com.mist.formchecker.ui.theme.RepCounterDisplayCompact
 import com.mist.formchecker.ui.theme.RepCounterLabel
@@ -63,6 +63,7 @@ import com.mist.formchecker.ui.theme.Spacing
 import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TextPrimary
 import com.mist.formchecker.ui.theme.TouchTarget
+import kotlin.math.abs
 
 /**
  * 운동 화면 — **개발·검증용**. 사용자용은 [ExerciseScreen]이다.
@@ -74,6 +75,8 @@ import com.mist.formchecker.ui.theme.TouchTarget
  *
  * ## 여기만 있는 것
  * - 모델 전환(RTMPose ↔ MoveNet) — 스켈레톤 정렬과 추론 시간을 나란히 보기 위함
+ * - **무릎–발끝 허용폭 전환**([KneeToleranceSelector]) — 임계값을 바꿔가며 실제 동작에서
+ *   판정이 얼마나 달라지는지 보는 자리. 저장되지 않는 실험 노브다
  * - 무릎 각도·깊이비·무릎폭비·좌우차·힙쏠림·무릎–발끝 편차
  * - 기준선 정규화 원값(대퇴각·몸통각·힙낙하·무릎 내측이동)
  * - 추론 지연·fps·모델 로딩·드롭 프레임
@@ -136,98 +139,112 @@ private fun WorkoutContent(
         if (state.engineReady) viewModel.createAnalyzer() else null
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        // 카메라는 남는 높이를 차지하고, 그 안에서 3:4를 지킨 크기로 줄어든다.
-        // 아래 컨트롤들이 먼저 자리를 잡으므로 화면 밖으로 밀려나지 않는다.
+    Column(modifier = modifier.fillMaxSize()) {
+        // ## 프리뷰가 화면 폭 전부이고 상단 고정이다 — 사용자 화면과 같은 구조다
+        //
+        // 예전에는 프리뷰가 `weight(1f)`로 **남는 높이**를 받고 3:4로 줄어들었다. 그러면
+        // 컨트롤이 한 줄 늘 때마다 카메라가 작아진다 — 실제로 무릎 허용폭 줄을 넣자
+        // 눈에 띄게 줄었다. 개발 화면은 컨트롤이 계속 늘어나는 화면이므로 그 구조가
+        // 스켈레톤을 보기 어렵게 만든다.
+        //
+        // 폭 기준 3:4가 이 기기의 천장이다 — 폭 1440이면 높이 1920이고, **세로 공간을 더
+        // 확보해도 커지지 않는다**(CLAUDE.md). 그 이상은 프리뷰와 분석 비율을 분리해야
+        // 하고 분석 가로의 32%가 화면 밖으로 나간다.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
-            contentAlignment = Alignment.Center,
+                // 분석 프레임과 같은 3:4를 유지한다. 컨테이너 비율이 프레임과 다르면
+                // 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다. 여기서는 **폭이 제약**이므로
+                // matchHeightConstraintsFirst를 쓰지 않는다.
+                .aspectRatio(3f / 4f)
+                // 화면 폭 전부를 쓰므로 둥근 모서리를 두지 않는다 — 화면 가장자리에서
+                // 프리뷰가 깎여 보인다.
+                .background(Color.Black),
         ) {
-            Box(
-                modifier = Modifier
-                    // 분석 프레임과 같은 3:4를 유지한다. 컨테이너 비율이 프레임과 다르면
-                    // 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
-                    // matchHeightConstraintsFirst: 높이가 제약이므로 높이에서 너비를 도출한다.
-                    .aspectRatio(3f / 4f, matchHeightConstraintsFirst = true)
-                    .clip(RoundedCornerShape(Radius.lg))
-                    .background(Color.Black),
-            ) {
-                if (analyzer != null) {
-                    CameraPreview(
-                        analyzer = analyzer,
-                        lensFacing = state.lensFacing,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    SkeletonOverlay(
-                        pose = state.result?.pose,
-                        // 추론은 반전 없이 하고 표시할 때만 뒤집는다 (PoseAnalyzer 주석 참고).
-                        mirrored = state.isFrontCamera,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    WorkoutHud(
-                        state = state,
-                        onReset = viewModel::resetRepCount,
-                        onSwitchAngle = viewModel::selectCameraAngle,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    }
+            if (analyzer != null) {
+                CameraPreview(
+                    analyzer = analyzer,
+                    lensFacing = state.lensFacing,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                SkeletonOverlay(
+                    pose = state.result?.pose,
+                    // 추론은 반전 없이 하고 표시할 때만 뒤집는다 (PoseAnalyzer 주석 참고).
+                    mirrored = state.isFrontCamera,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                WorkoutHud(
+                    state = state,
+                    onReset = viewModel::resetRepCount,
+                    onSwitchAngle = viewModel::selectCameraAngle,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        PoseModelSelector(
-            selected = state.poseModel,
-            onSelect = viewModel::selectPoseModel,
-        )
+        // 프리뷰 아래는 **스크롤**이다. 개발용 노브가 계속 늘어나므로 고정 높이로 쌓으면
+        // 해상도에 따라 아래 버튼이 잘린다 — 결과 화면에서 겪은 것과 같은 문제다.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            PoseModelSelector(
+                selected = state.poseModel,
+                onSelect = viewModel::selectPoseModel,
+            )
 
-        CameraAngleSelector(
-            selected = state.cameraAngle,
-            onSelect = viewModel::selectCameraAngle,
-        )
+            KneeToleranceSelector(
+                selected = state.kneeToeTolerance,
+                deviation = state.form?.kneeToeDeviation,
+                onSelect = viewModel::selectKneeToeTolerance,
+            )
 
-        CalibrationBar(
-            state = state,
-            onStart = viewModel::startCalibration,
-            onCancel = viewModel::cancelCalibration,
-        )
+            CameraAngleSelector(
+                selected = state.cameraAngle,
+                onSelect = viewModel::selectCameraAngle,
+            )
 
-        // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            OutlinedButton(
-                onClick = viewModel::toggleCamera,
-                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text(
-                    if (state.isFrontCamera) "후면" else "전면",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            OutlinedButton(
-                onClick = onBack,
-                modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text("뒤로", style = MaterialTheme.typography.labelMedium)
-            }
-            Button(
-                // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
-                // 아직 없는 행을 조회하게 된다.
-                onClick = { viewModel.finishSession(onFinish) },
-                modifier = Modifier.weight(2f).height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text("운동 종료", style = MaterialTheme.typography.labelMedium)
+            CalibrationBar(
+                state = state,
+                onStart = viewModel::startCalibration,
+                onCancel = viewModel::cancelCalibration,
+            )
+
+            // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                OutlinedButton(
+                    onClick = viewModel::toggleCamera,
+                    modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text(
+                        if (state.isFrontCamera) "후면" else "전면",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onBack,
+                    modifier = Modifier.weight(1f).height(TouchTarget.minSize),
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text("뒤로", style = MaterialTheme.typography.labelMedium)
+                }
+                Button(
+                    // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
+                    // 아직 없는 행을 조회하게 된다.
+                    onClick = { viewModel.finishSession(onFinish) },
+                    modifier = Modifier.weight(2f).height(TouchTarget.minSize),
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text("운동 종료", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
@@ -482,6 +499,82 @@ private fun RepEvent.Aborted.Reason.label(): String = when (this) {
     RepEvent.Aborted.Reason.TOO_FAST -> "너무 빠름"
     RepEvent.Aborted.Reason.TIMEOUT -> "시간 초과"
     RepEvent.Aborted.Reason.POSE_LOST -> "자세 놓침"
+}
+
+/**
+ * 무릎–발끝 허용폭 전환 + 지금 값이 어느 임계값을 넘는지.
+ *
+ * ## 왜 다섯 개를 동시에 보여주나
+ * 버튼만 있으면 값마다 스쿼트를 다시 해야 하고, **같은 동작을 다섯 번 똑같이 반복할 수는
+ * 없다** — 비교가 아니라 다섯 번의 다른 측정이 된다. 지금 편차 하나로 다섯 임계값의 결과가
+ * 전부 정해지므로, 한 번 앉는 동안 다섯 개를 나란히 볼 수 있다. 버튼은 "판정을 실제로
+ * 그 값으로 돌려서" rep 경고·소리까지 확인할 때 쓴다.
+ *
+ * 넘음(`초과`)은 판정이 아니라 **비교 표시**다 — `|편차| > 임계값` 한 줄이고, 실제 판정은
+ * [KneeTolerance]로 갈아끼운 `SquatFormAnalyzer`가 낸다. 화면이 자기 판정을 만들면 두
+ * 화면이 다른 답을 낸다(CLAUDE.md).
+ *
+ * 게이트가 닫혀 있으면(선 자세·발 겹침) 편차가 null이라 비교할 것이 없다. 그때는 왜 없는지
+ * 위의 `깊이(정강이)` 값으로 본다.
+ */
+@Composable
+private fun KneeToleranceSelector(
+    selected: Float,
+    deviation: Float?,
+    onSelect: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Text(
+            text = "무릎 허용폭" + (deviation?.let { "  ·  지금 ${it.formatRatio()}" } ?: "  ·  판정 불가"),
+            style = MaterialTheme.typography.labelMedium,
+            color = TextMuted,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
+            KneeTolerance.OPTIONS.forEach { value ->
+                val isSelected = value == selected
+                // 지금 편차가 이 값을 넘는가. 판정이 아니라 비교다.
+                val exceeds = deviation?.let { abs(it) > value }
+                val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
+                val label = buildString {
+                    append(KneeTolerance.label(value))
+                    // 색만으로 전달하지 않는다 (디자인시스템 34행).
+                    when (exceeds) {
+                        true -> append("\n초과")
+                        false -> append("\n통과")
+                        null -> Unit
+                    }
+                }
+                if (isSelected) {
+                    Button(
+                        onClick = { onSelect(value) },
+                        modifier = buttonModifier,
+                        contentPadding = CompactButtonPadding,
+                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                } else {
+                    OutlinedButton(
+                        onClick = { onSelect(value) },
+                        modifier = buttonModifier,
+                        contentPadding = CompactButtonPadding,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = when (exceeds) {
+                                true -> FeedbackWarning
+                                false -> FeedbackSuccess
+                                null -> TextMuted
+                            },
+                        ),
+                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
+    }
 }
 
 /**
