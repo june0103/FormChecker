@@ -3,6 +3,8 @@ package com.mist.formchecker.ui.screen
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mist.formchecker.data.AppSettings
+import com.mist.formchecker.data.BodyProfile
+import com.mist.formchecker.poseengine.Sex
 import com.mist.formchecker.ui.screen.workout.CalibrationPrep
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,6 +36,44 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = CalibrationPrep.DEFAULT_SECONDS,
         )
+
+    /**
+     * 저장된 키·몸무게. 둘 다 있을 때만 값이 나온다.
+     *
+     * 입력 중인 글자는 여기 담지 않는다 — "17"까지 친 순간 키가 17cm로 저장되면 안 된다.
+     * 화면이 자기 입력 상태를 들고 있고, 유효한 값이 됐을 때만 [saveBodyProfile]을 부른다.
+     */
+    val bodyProfile: StateFlow<BodyProfile?> = settings.bodyProfile
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
+
+    /**
+     * 키·몸무게를 저장한다. 범위를 벗어난 값은 무시한다.
+     *
+     * @param heightCm null이면 지운다.
+     * @param weightKg null이면 지운다.
+     */
+    fun saveBodyProfile(heightCm: Float?, weightKg: Float?) {
+        // 오타 방어. 700kg이 저장되면 열량이 10배로 나오는데 사용자는 그게 틀렸다는 것을
+        // 알 방법이 없다.
+        if (heightCm != null && !BodyProfile.heightValid(heightCm)) return
+        if (weightKg != null && !BodyProfile.weightValid(weightKg)) return
+        viewModelScope.launch { settings.setBodyProfile(heightCm, weightKg) }
+    }
+
+    /** 나이. 범위를 벗어나면 무시한다. null이면 지운다. */
+    fun saveAge(age: Int?) {
+        if (age != null && !BodyProfile.ageValid(age)) return
+        viewModelScope.launch { settings.setAge(age) }
+    }
+
+    /** 성별. null이면 지운다. */
+    fun saveSex(sex: Sex?) {
+        viewModelScope.launch { settings.setSex(sex) }
+    }
 
     fun selectPrepSeconds(seconds: Int) {
         // 목록 밖의 값이 들어오면 저장하지 않는다. 화면이 목록만 보여주므로 지금은 일어날
