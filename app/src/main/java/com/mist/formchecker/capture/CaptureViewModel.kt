@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.camera.core.CameraSelector
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mist.formchecker.audio.AudioCues
 import com.mist.formchecker.poseengine.CaptureIntent
 import com.mist.formchecker.poseengine.CaptureQuality
 import com.mist.formchecker.poseengine.CaptureRecorder
@@ -140,7 +141,7 @@ class CaptureViewModel @Inject constructor(
     /** 마지막으로 소리로 알린 품질 상태. 같은 상태에서 반복해 울리지 않게 한다. */
     private var lastQualityPassed: Boolean? = null
 
-    private val cues = CaptureCues()
+    private val cues = AudioCues()
 
     // 실측 fps
     private var smoothedFrameIntervalMs = 0.0
@@ -201,7 +202,7 @@ class CaptureViewModel @Inject constructor(
                 calibrationRemainingMs = CALIBRATION_DURATION_MS,
             )
         }
-        cues.play(CaptureCues.Cue.QUALITY_OK)
+        cues.play(AudioCues.Cue.QUALITY_OK)
     }
 
     /** 캘리브레이션을 다시 시도한다. */
@@ -241,7 +242,7 @@ class CaptureViewModel @Inject constructor(
         _uiState.update {
             it.copy(stage = CaptureStage.RECORDING, calibration = calibration, reps = emptyList())
         }
-        cues.play(CaptureCues.Cue.CALIBRATED)
+        cues.play(AudioCues.Cue.CALIBRATED)
     }
 
     /** 촬영을 끝내고 검토 단계로 간다. */
@@ -250,7 +251,7 @@ class CaptureViewModel @Inject constructor(
         // rep 이후의 대기 프레임과 중단된 채 끝난 rep의 프레임이 여기서만 나갈 수 있다.
         recorder?.drain()?.forEach(logSession::logFrame)
         _uiState.update { it.copy(stage = CaptureStage.REVIEW) }
-        cues.play(CaptureCues.Cue.SESSION_END)
+        cues.play(AudioCues.Cue.SESSION_END)
         logSession.logReps(_uiState.value.reps)
     }
 
@@ -369,7 +370,7 @@ class CaptureViewModel @Inject constructor(
         if (lastQualityPassed == quality.passed) return
         lastQualityPassed = quality.passed
         cues.play(
-            if (quality.passed) CaptureCues.Cue.QUALITY_OK else CaptureCues.Cue.FAILED,
+            if (quality.passed) AudioCues.Cue.QUALITY_OK else AudioCues.Cue.FAILED,
         )
     }
 
@@ -395,7 +396,7 @@ class CaptureViewModel @Inject constructor(
             _uiState.update {
                 it.copy(calibrationProblems = listOf(StandingCalibration.Problem.TOO_FEW_FRAMES))
             }
-            cues.play(CaptureCues.Cue.FAILED)
+            cues.play(AudioCues.Cue.FAILED)
             calibrationFrames.clear()
             calibrationStartMs = null
             return
@@ -404,7 +405,7 @@ class CaptureViewModel @Inject constructor(
         val validation = calibration.validate()
         _uiState.update { it.copy(calibrationProblems = validation.problems) }
         if (!validation.passed) {
-            cues.play(CaptureCues.Cue.FAILED)
+            cues.play(AudioCues.Cue.FAILED)
             calibrationFrames.clear()
             calibrationStartMs = null
             return
@@ -419,7 +420,7 @@ class CaptureViewModel @Inject constructor(
         // 유일한 통보 수단이다.
         if (lastQualityPassed != quality.passed) {
             lastQualityPassed = quality.passed
-            if (!quality.passed) cues.play(CaptureCues.Cue.QUALITY_LOST)
+            if (!quality.passed) cues.play(AudioCues.Cue.QUALITY_LOST)
         }
 
         // 필터 전·후 좌표를 모두 넘긴다. 지금은 PoseAnalyzer가 필터를 적용하지 않으므로
@@ -444,7 +445,7 @@ class CaptureViewModel @Inject constructor(
             state.copy(reps = withDeviations(state.reps + completed.rep))
         }
         logSession.logReps(_uiState.value.reps)
-        if (completed.rep.counted) cues.play(CaptureCues.Cue.REP_DONE)
+        if (completed.rep.counted) cues.play(AudioCues.Cue.REP_DONE)
     }
 
     // ── 엔진 ────────────────────────────────────────────────

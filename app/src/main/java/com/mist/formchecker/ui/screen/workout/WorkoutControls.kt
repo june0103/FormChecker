@@ -427,6 +427,15 @@ internal fun CalibrationBar(
             }
 
             CalibrationStage.NONE -> {
+                // 소리가 이 화면의 주 피드백 채널이다. 볼륨이 0이면 톤이 하나도 들리지
+                // 않는데, 그 사실을 모르면 기능이 고장난 것으로 읽는다.
+                if (state.soundMuted) {
+                    Text(
+                        text = "소리가 꺼져 있어요 — 볼륨을 올리면 횟수와 자세를 소리로 알려드려요",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = FeedbackWarning,
+                    )
+                }
                 InfoNote(notes) {
                     Text(
                         // 예전 문구는 "아직 안 재셨어요"였다. 그때는 기준선이 선택이라
