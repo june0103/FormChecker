@@ -417,6 +417,10 @@ private fun HudBottomBand(
                 val state = form.kneeAlignment?.label().orEmpty()
                 add("무릎-발끝 ${deviation.formatRatio()}${if (state.isEmpty()) "" else " ($state)"}")
             }
+            // 측면 무릎 돌출. 양수가 "발끝을 넘었다"이므로 부호까지 보여준다.
+            // 게이트(발 가시성·깊이)가 닫히면 아예 안 나오므로, 값이 없는 것 자체가
+            // "지금은 판정하지 않는다"는 신호다.
+            state.features?.kneeOverToe?.let { add("무릎앞 ${it.formatRatio()}") }
         }
         if (judgements.isNotEmpty()) {
             Text(

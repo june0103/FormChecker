@@ -90,6 +90,23 @@ class SquatFormAnalyzer(
         val heelRise = features?.heelRise
             ?.takeIf { cameraAngle.supports(FormCheck.HEEL_LIFT) && footVisible }
 
+        // 무릎이 발끝을 넘었는가. 게이트가 셋이고 **전부 근거가 있다.**
+        //
+        // 1. 측면 — 정면에서는 앞뒤가 깊이축이라 화면에 거의 나타나지 않는다.
+        // 2. `footVisible` — 뒤꿈치 들림과 **같은 게이트**다. 발이 짧게 보이면 발끝이
+        //    뒤꿈치 쪽으로 당겨져 분자는 커지고 분모는 작아진다. 실측에서 발끝을 넘은 rep이
+        //    **전부** 이 게이트에 걸리는 세션에서 나왔다
+        //    (FormThresholds.kneeOverToeLimit 주석의 실측 표).
+        // 3. 깊이 — "무릎이 발끝을 넘지 않는다"는 **앉았을 때** 성립하는 규칙이다. 선
+        //    자세에서는 무릎이 발끝보다 뒤에 있어 어차피 안 걸리지만, 게이트를 명시해
+        //    무릎–발끝 정렬(정면)과 같은 구조를 유지한다. 같은 `kneeToeMinDepth`를 쓰는
+        //    이유: 두 판정이 같은 것("확실히 앉기 시작한 지점")을 묻고, `shinDepthRatio`는
+        //    세로 거리만 써서 촬영 각도와 무관하다.
+        val kneeOverToe = features?.kneeOverToe?.takeIf {
+            cameraAngle.supports(FormCheck.KNEE_OVER_TOE) && footVisible &&
+                (features.shinDepthRatio ?: Float.NEGATIVE_INFINITY) >= form.kneeToeMinDepth
+        }
+
         // 골반 좌우 쏠림. 발목 간격 정규화라 기준선이 필요 없고, 좌우 비대칭 판정에
         // 속하므로 정면에서만 본다.
         val hipShiftRatio = if (cameraAngle.supports(FormCheck.SYMMETRY)) {
@@ -140,6 +157,7 @@ class SquatFormAnalyzer(
             depthRatio = depthRatio,
             torsoLeanDegrees = torsoLean,
             heelRise = heelRise,
+            kneeOverToe = kneeOverToe,
             kneeSpreadRatio = kneeSpreadRatio(pose),
             hipShiftRatio = hipShiftRatio,
             kneeToeDeviation = kneeToeDeviation,
@@ -177,6 +195,11 @@ class SquatFormAnalyzer(
     ): List<FormWarning> = buildList {
         val heelLifted = heelRise != null && heelRise > form.heelRiseLimit
         if (heelLifted) add(FormWarning.HEEL_RISE)
+
+        // 무릎이 발끝을 넘었는가는 **프레임 단위로 판정하지 않는다.** 임계값 0을 프레임에
+        // 대면 정상 rep의 46%가 걸린다(FormThresholds.kneeOverToeLimit 주석의 표).
+        // rep 중앙값으로 판정하며, 그 계산은 호출부가 rep을 마감할 때 한다
+        // (FormThresholds.kneePastToeOf). 깊이가 이미 같은 구조다.
         /**
          * 뒤꿈치가 뜨면 깊이 부족을 말하지 않는다.
          *

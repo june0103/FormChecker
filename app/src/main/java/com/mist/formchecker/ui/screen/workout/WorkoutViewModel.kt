@@ -529,6 +529,14 @@ class WorkoutViewModel @Inject constructor(
     private val repWarnings = mutableSetOf<FormWarning>()
 
     /**
+     * 이 rep에서 게이트를 통과한 무릎 돌출값들. **rep이 끝날 때 중앙값으로 판정한다.**
+     *
+     * 프레임 단위로 판정하지 않는 이유는 `FormThresholds.kneeOverToeLimit` 주석에 있다 —
+     * 허용폭이 0이라 프레임 하나라도 넘으면 정상 rep의 46%가 걸린다.
+     */
+    private val repKneeOverToe = mutableListOf<Float>()
+
+    /**
      * 이 rep에서 무릎 편차가 가장 컸던 쪽과 그 크기.
      *
      * 프레임마다 좌우 중 나쁜 쪽이 바뀔 수 있으므로 **구간 전체에서 가장 큰 편차**가 나온
@@ -735,6 +743,7 @@ class WorkoutViewModel @Inject constructor(
             repMaxDepthRatio = null
             repMaxShinDepth = null
             repWarnings.clear()
+            repKneeOverToe.clear()
             repWorstKnee = null
             repWarningPhases.clear()
         }
@@ -757,7 +766,7 @@ class WorkoutViewModel @Inject constructor(
         //
         // 경고가 없어도 `update`는 매 프레임 부른다 — 만료가 거기서 일어나므로, 건너뛰면
         // rep이 끝난 뒤 마지막 경고가 화면에 영원히 남는다.
-        val heldWarnings = feedbackHold.update(
+        var heldWarnings = feedbackHold.update(
             warnings = if (inRep) form.warnings else emptyList(),
             side = form.kneeToeSide,
             nowMs = result.timestampMs,
@@ -775,6 +784,9 @@ class WorkoutViewModel @Inject constructor(
                     repWarningPhases.getOrPut(warning) { mutableSetOf() } += phase
                 }
             }
+            // 게이트를 통과한 프레임만 담긴다(분석기가 이미 걸렀다) — 게이트가 닫힌
+            // 프레임의 값이 섞이면 중앙값이 오염된다.
+            form.kneeOverToe?.let { repKneeOverToe += it }
             // 편차의 절대값이 가장 컸던 프레임의 쪽을 남긴다.
             val side = form.kneeToeSide
             val deviation = form.kneeToeDeviation
@@ -835,7 +847,19 @@ class WorkoutViewModel @Inject constructor(
             else -> null
         }
         if (event is RepEvent.Completed) {
-            recordCompletedRep(event.summary, repDepth, repDepthBasis)
+            // rep 중앙값으로 판정한다. 여기서 한 번 계산해 저장과 화면이 같은 값을 쓴다.
+            val repKneePastToe = config.form.kneePastToeOf(repKneeOverToe.toList())
+            recordCompletedRep(event.summary, repDepth, repDepthBasis, repKneePastToe)
+            if (repKneePastToe == true) {
+                // **rep 단위 판정이라 프레임 경고에 없다.** 화면에는 rep이 끝난 시점에
+                // 올린다 — 무릎 위치는 앉는 방식의 결과라 rep 중간에 고칠 수 없고, 다음
+                // rep을 시작할 때 쓸 지시다. 붙잡는 시간이 지나면 알아서 내려간다.
+                heldWarnings = feedbackHold.update(
+                    warnings = listOf(FormWarning.KNEE_PAST_TOE),
+                    side = null,
+                    nowMs = result.timestampMs,
+                )
+            }
         }
 
         _uiState.update { state ->
@@ -876,12 +900,19 @@ class WorkoutViewModel @Inject constructor(
         summary: RepSummary,
         depth: DepthLevel?,
         basis: DepthBasis?,
+        kneePastToe: Boolean?,
     ) {
         val warnings = repWarnings.toSet()
         // 깊이 경고는 프레임이 아니라 rep 최저점으로 판정한다. 프레임 단위 경고를 그대로
         // 쓰면 하강 중 잠깐 SHALLOW였던 것이 남는데, 그건 지나가는 중이었을 뿐이다.
+        //
+        // 무릎이 발끝을 넘었는가도 **rep 단위**다. 허용폭이 0이라 프레임 단위로는 정상
+        // rep의 46%가 걸린다 — 중앙값으로 보면 같은 0에서 0%다
+        // (`FormThresholds.kneeOverToeLimit` 주석의 표). 그래서 이 두 항목만 프레임 경고에
+        // 담기지 않고 여기서 결정된다.
         val repLevelWarnings = warnings.minus(FormWarning.SHALLOW_DEPTH) +
-            setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { depth == DepthLevel.SHALLOW })
+            setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { depth == DepthLevel.SHALLOW }) +
+            setOfNotNull(FormWarning.KNEE_PAST_TOE.takeIf { kneePastToe == true })
 
         // **소리는 rep이 끝날 때만 낸다.**
         //
@@ -1355,6 +1386,7 @@ class WorkoutViewModel @Inject constructor(
         repMaxDepthRatio = null
         repMaxShinDepth = null
         repWarnings.clear()
+        repKneeOverToe.clear()
         repWorstKnee = null
         repWarningPhases.clear()
     }
@@ -1372,6 +1404,7 @@ class WorkoutViewModel @Inject constructor(
         // 진행 중이던 rep의 깊이를 다음 rep으로 흘리지 않는다.
         repMaxDepthRatio = null
         repMaxShinDepth = null
+        repKneeOverToe.clear()
     }
 
     private fun onFrameDropped() {

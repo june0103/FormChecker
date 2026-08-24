@@ -23,7 +23,10 @@ enum class CameraAngle {
 
     val supportedChecks: Set<FormCheck>
         get() = when (this) {
-            SIDE -> setOf(FormCheck.DEPTH, FormCheck.TORSO_LEAN, FormCheck.HEEL_LIFT)
+            SIDE -> setOf(
+                FormCheck.DEPTH, FormCheck.TORSO_LEAN, FormCheck.HEEL_LIFT,
+                FormCheck.KNEE_OVER_TOE,
+            )
             FRONT -> setOf(FormCheck.KNEE_ALIGNMENT, FormCheck.SYMMETRY)
         }
 }
@@ -54,6 +57,18 @@ enum class FormCheck {
      * 뜨면 "뒤꿈치가 떴는데 더 깊게 앉으라"는 서로 반대인 지시가 된다.
      */
     HEEL_LIFT,
+
+    /**
+     * 무릎 앞쪽 이동 — 앉을 때 무릎이 발끝보다 앞으로 나갔는가. 측면에서만 보인다.
+     *
+     * 정면에서는 앞뒤가 깊이축이라 화면에 거의 나타나지 않는다.
+     *
+     * ## [HEEL_LIFT]와 원인이 같다
+     * 정강이가 앞으로 기울면 무릎이 앞으로 나가고, 더 기울면 뒤꿈치가 뜬다 — 같은 움직임의
+     * 정도 차이다. 둘이 함께 뜰 수 있고 **지시도 같은 방향**이라("덜 앞으로") 서로 배제하지
+     * 않는다. 깊이-뒤꿈치 관계와 다른 점이 이것이다.
+     */
+    KNEE_OVER_TOE,
 
     /** 무릎 정렬 — 무릎이 안으로 말리는가(valgus). 정면에서만 보인다. */
     KNEE_ALIGNMENT,

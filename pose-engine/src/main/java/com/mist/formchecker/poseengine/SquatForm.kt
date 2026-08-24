@@ -123,6 +123,16 @@ data class SquatForm(
      * 없는지 보려면 값과 게이트를 함께 봐야 한다.
      */
     val heelRise: Float?,
+
+    /**
+     * 무릎이 발끝을 넘은 정도. 양수면 넘었다. 측면 전용.
+     *
+     * **게이트를 통과한 프레임에서만 값이 있다** — [heelRise]와 반대 규칙이다. 이 값은
+     * 화면 표시용이 아니라 **rep 단위 판정의 입력**이므로(`FormThresholds.kneePastToeOf`),
+     * 게이트가 닫힌 프레임의 값이 섞이면 중앙값이 오염된다. 게이트를 통과했는지 알아야
+     * 하는 개발 화면은 `FrameFeatures.kneeOverToe`(게이트 전)를 본다.
+     */
+    val kneeOverToe: Float?,
     /**
      * 무릎폭 ÷ 발목폭. **판정이 아니라 측정값이다.**
      *
@@ -230,6 +240,17 @@ enum class FormWarning(val check: FormCheck) {
      * 판정에서 아예 배제한다([SquatFormAnalyzer]의 `warningsOf`).
      */
     HEEL_RISE(FormCheck.HEEL_LIFT),
+
+    /**
+     * 앉을 때 무릎이 발끝보다 앞으로 나갔다. 측면 전용.
+     *
+     * **[HEEL_RISE] 다음이다.** 원인이 같은 움직임(정강이가 앞으로 기울기)이고 지시도 같은
+     * 방향이라 배제하지 않지만, 뒤꿈치가 뜬 것이 더 눈에 보이는 사실이므로 먼저 말한다.
+     *
+     * 프레임 단위로 판정한다 — 기준점 0(무릎이 발끝을 넘지 않음)이 정의라서 선 자세
+     * 기준선이 필요 없다.
+     */
+    KNEE_PAST_TOE(FormCheck.KNEE_OVER_TOE),
     SHALLOW_DEPTH(FormCheck.DEPTH),
     EXCESSIVE_LEAN(FormCheck.TORSO_LEAN),
 

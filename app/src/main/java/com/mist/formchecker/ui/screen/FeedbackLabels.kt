@@ -30,6 +30,7 @@ object FeedbackLabels {
     /** 짧은 이름. rep 목록·기록 목록처럼 좁은 자리에 쓴다. */
     fun shortName(warning: FormWarning): String = when (warning) {
         FormWarning.HEEL_RISE -> "뒤꿈치 들림"
+        FormWarning.KNEE_PAST_TOE -> "무릎 앞으로"
         FormWarning.SHALLOW_DEPTH -> "덜 앉음"
         FormWarning.EXCESSIVE_LEAN -> "상체 숙임"
         FormWarning.HIP_SHIFT -> "좌우 쏠림"
@@ -59,6 +60,9 @@ object FeedbackLabels {
             // 대개 발목 가동성의 한계여서, 그 깊이에서 억지로 붙이려 하면 허리가 말린다.
             // 행동을 앞에 두고 이유를 뒤에 붙인다.
             FormWarning.HEEL_RISE -> "뒤꿈치가 뜨니 덜 앉으세요"
+            // "무릎을 뒤로"는 할 수 없는 동작이다 — 무릎은 앉는 방식의 결과다. 엉덩이를
+            // 뒤로 빼면 정강이가 서고 무릎이 따라 들어온다. 원인 쪽을 지시한다.
+            FormWarning.KNEE_PAST_TOE -> "엉덩이를 뒤로 빼며 앉으세요"
             FormWarning.SHALLOW_DEPTH -> "더 깊게 앉으세요"
             FormWarning.EXCESSIVE_LEAN -> "상체를 세우세요"
             // 쏠림은 밀어 올리는 순간에 드러난다 — "서세요"보다 "일어서세요"가 그
@@ -84,6 +88,7 @@ object FeedbackLabels {
         // 항목 이름은 중립적으로 둔다 — "들림"은 이미 문제를 가리키는 말이라
         // "못 봤어요"와 붙으면 무엇을 못 봤는지 흐려진다.
         FormWarning.HEEL_RISE -> "뒤꿈치"
+        FormWarning.KNEE_PAST_TOE -> "무릎 위치"
         FormWarning.SHALLOW_DEPTH -> "앉은 깊이"
         FormWarning.EXCESSIVE_LEAN -> "상체 각도"
         FormWarning.HIP_SHIFT -> "좌우 균형"

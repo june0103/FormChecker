@@ -90,6 +90,15 @@ data class FrameFeatures(
      */
     val heelRise: Float?,
 
+    /**
+     * 활성측 무릎이 발끝보다 앞으로 나간 정도 `(무릎.x − 발끝.x) / 발 길이`. 측면 전용.
+     * **양수 = 발끝을 넘었다.**
+     *
+     * [heelRise]와 같은 이유로 활성측 하나만 본다 — 측면에서 반대쪽 다리는 가려져
+     * 추정이 흔들린다.
+     */
+    val kneeOverToe: Float?,
+
     // ── 정면 특징 (문서 §10) ────────────────────────────────
     /** 스탠스 너비 `발목 간격 / hipWidth`. */
     val stanceWidthRatio: Float?,
@@ -333,6 +342,42 @@ data class FrameFeatures(
                 return ((toe.second - pose[heel].y) - standing) / tibia
             }
 
+            /**
+             * 무릎이 발끝보다 얼마나 앞으로 나갔나. **양수 = 발끝을 넘었다.** 측면 전용.
+             *
+             * ```
+             * 전방부호 = sign(발끝.x − 뒤꿈치.x)
+             * 돌출     = (무릎.x − 발끝.x) × 전방부호 / 발 길이
+             * ```
+             *
+             * ## 좌/우 촬영을 몰라도 된다
+             * 앞쪽을 **발 자신이 가리킨다** — 발끝은 언제나 뒤꿈치보다 앞이다. 촬영 방향
+             * (`SIDE_LEFT`/`SIDE_RIGHT`)이나 카메라 반전을 따로 알 필요가 없고, 사용자
+             * 화면은 어차피 `SIDE` 하나로만 판별하므로 이 방식이어야 한다.
+             *
+             * ## 분모가 **화면에 보이는** 발 길이다
+             * 기준선의 `footLength`가 아니라 이 프레임의 `|발끝.x − 뒤꿈치.x|`를 쓴다.
+             * 분자도 같은 두 점 사이의 x 거리라 **같은 단축을 함께 겪으므로**, 발이 비스듬히
+             * 보여도 비율이 덜 흔들린다.
+             *
+             * 그래도 발이 너무 짧게 보이면 무너진다 — 발끝이 뒤꿈치 쪽으로 당겨져 분자는
+             * 커지고 분모는 작아진다. 실측이 그것을 그대로 보여줬으므로 판정 쪽에서
+             * [footTibiaRatio] 게이트를 건다([FormThresholds.kneeOverToeLimit] 주석).
+             */
+            fun kneeOverToe(side: Side): Float? {
+                if (!view.isSide) return null
+                val knee = Geometry.knee(side)
+                val heel = Geometry.heel(side)
+                if (!ok(knee) || !ok(heel)) return null
+                val toe = Geometry.toeCenter(pose, side, aspectRatio, minConfidence)
+                    ?: return null
+                val heelX = p(heel).first
+                val footSpan = toe.first - heelX
+                if (abs(footSpan) <= Geometry.EPSILON) return null
+                val forward = if (footSpan > 0f) 1f else -1f
+                return (p(knee).first - toe.first) * forward / abs(footSpan)
+            }
+
             // ── 정면 ────────────────────────────────────────
             val ankleCenter = if (ok(KeypointType.LEFT_ANKLE) && ok(KeypointType.RIGHT_ANKLE)) {
                 Geometry.midpoint(p(KeypointType.LEFT_ANKLE), p(KeypointType.RIGHT_ANKLE))
@@ -481,6 +526,7 @@ data class FrameFeatures(
                 leftHeelRise = heelRise(Side.LEFT),
                 rightHeelRise = heelRise(Side.RIGHT),
                 heelRise = activeSide?.let { heelRise(it) },
+                kneeOverToe = activeSide?.let { kneeOverToe(it) },
                 stanceWidthRatio = stanceWidthRatio,
                 leftMedialKneeDisplacement = medialKnee(Side.LEFT),
                 rightMedialKneeDisplacement = medialKnee(Side.RIGHT),
