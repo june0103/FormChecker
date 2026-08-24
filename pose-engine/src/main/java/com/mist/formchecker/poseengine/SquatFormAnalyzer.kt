@@ -215,7 +215,16 @@ class SquatFormAnalyzer(
          * 반대로 억누르지 않는 이유: 뒤꿈치 들림은 [FormThresholds.minHeelFootRatio] 게이트
          * 때문에 판정되지 않는 세션이 있다. 그때 깊이까지 막으면 두 항목을 동시에 잃는다.
          */
-        if (!heelLifted && depth == DepthLevel.SHALLOW) add(FormWarning.SHALLOW_DEPTH)
+        // 여기서 `SHALLOW_DEPTH`를 넣지 않는다 — **rep 최저점으로 판정한다.**
+        //
+        // 프레임 단위로 내보내면 **아직 내려가는 중인 사람에게 "덜 앉았다"고 말한다.**
+        // 하강은 `STANDING → SHALLOW → PARALLEL`을 지나므로 얕은 구간이 반드시 있고, 그건
+        // 실패가 아니라 지나가는 중이다(사용자 신고, 2026-08-24).
+        //
+        // 위 `heelLifted` 배제도 rep 단위로 옮겼다 — 호출부가 `HEEL_RISE`가 이 rep에
+        // 있었는지를 보고 뺀다. 예전에는 프레임에서만 배제해서 **rep 기록에는 둘이 함께
+        // 남을 수 있었다**(rep 조립이 최저점 깊이만 보고 무조건 넣었다). 판정 지점을
+        // 한 곳으로 모으면서 그 어긋남도 없앤다.
         if (torsoLeanDegrees != null && torsoLeanDegrees > form.torsoLeanLimitDegrees) {
             add(FormWarning.EXCESSIVE_LEAN)
         }
