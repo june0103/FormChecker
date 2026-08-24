@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import android.os.Build
 import androidx.lifecycle.viewModelScope
 import com.mist.formchecker.audio.AudioCues
+import com.mist.formchecker.data.AppSettings
 import com.mist.formchecker.data.CompletedRepInput
 import com.mist.formchecker.data.SessionMetricsInput
 import com.mist.formchecker.data.WorkoutRepository
@@ -145,10 +146,13 @@ data class WorkoutUiState(
     val calibrationRemainingMs: Long = 0,
 
     /**
-     * 측정 시작까지 줄 준비 시간(초). 사용자가 고른다.
+     * 측정 시작까지 줄 준비 시간(초). **설정에서 고른다.**
      *
-     * 기본 5초는 팔을 뻗어 버튼을 누르고 물러서는 거리를 기준으로 한 잠정값이다. 삼각대
-     * 위치나 방 크기에 따라 크게 달라지므로 고를 수 있게 두었다.
+     * 예전에는 이 화면에 선택 줄이 있었다. 삼각대 위치나 방 크기에 따라 크게 달라진다는
+     * 이유였는데, **한 사람에게는 거의 안 바뀌는 값**이라 매 세션 화면을 차지할 이유가
+     * 없었다. 설정으로 옮기고 값을 기억한다.
+     *
+     * 화면은 이 값을 버튼 문구에만 쓴다("5초 후 시작") — 여기서 바꿀 수는 없다.
      */
     val calibrationPrepSeconds: Int = CalibrationPrep.DEFAULT_SECONDS,
 
@@ -302,6 +306,7 @@ enum class CalibrationStage {
 class WorkoutViewModel @Inject constructor(
     application: Application,
     private val repository: WorkoutRepository,
+    settings: AppSettings,
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(WorkoutUiState())
@@ -474,6 +479,18 @@ class WorkoutViewModel @Inject constructor(
         // 화면에 들어온 시점에 한 번. 걸어가기 전에 알아야 볼륨을 올릴 수 있다.
         refreshSoundMuted()
         loadEngine()
+
+        // 설정이 바뀌면 이 화면을 다시 들어가지 않고 반영된다. 준비 시간은 측정을
+        // 시작하기 전에만 쓰이므로, 진행 중인 카운트다운이 흔들릴 걱정은 없다 —
+        // `startCalibration`이 시작 시점의 값을 읽어 그 창 내내 쓴다.
+        viewModelScope.launch {
+            settings.calibrationPrepSeconds.collect { seconds ->
+                val value = seconds ?: CalibrationPrep.DEFAULT_SECONDS
+                if (value != _uiState.value.calibrationPrepSeconds) {
+                    _uiState.update { it.copy(calibrationPrepSeconds = value) }
+                }
+            }
+        }
     }
 
     /**
@@ -817,12 +834,6 @@ class WorkoutViewModel @Inject constructor(
     }
 
     // ── 기준 자세 ───────────────────────────────────────────
-
-    /** 준비 시간을 바꾼다. 측정 중에는 바꾸지 않는다 — 진행 중인 카운트다운이 흔들린다. */
-    fun selectCalibrationPrepSeconds(seconds: Int) {
-        if (_uiState.value.calibrationStage == CalibrationStage.PREPARING) return
-        _uiState.update { it.copy(calibrationPrepSeconds = seconds) }
-    }
 
     /**
      * 기준 자세 측정을 시작한다. 이미 있으면 다시 잰다 — 카메라를 옮겼으면 기준선도 바뀐다.

@@ -77,6 +77,9 @@ dependencies {
     ksp(libs.androidx.hilt.compiler)
 
     // Room (local DB, source of truth)
+    // 설정 저장. Room은 기록용 1차 저장소이고, 이쪽은 스칼라 설정 몇 개다 —
+    // 테이블·마이그레이션을 만들 이유가 없고 Flow로 바로 읽힌다.
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
@@ -94,6 +97,8 @@ dependencies {
     implementation(libs.litert)
 
     testImplementation(libs.junit)
+    // 설정 저장은 suspend 함수다 — runTest 없이는 저장/읽기를 확인할 수 없다.
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

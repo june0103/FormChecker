@@ -199,7 +199,6 @@ private fun WorkoutContent(
             state = state,
             onStart = viewModel::startCalibration,
             onCancel = viewModel::cancelCalibration,
-            onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
         )
 
         // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.

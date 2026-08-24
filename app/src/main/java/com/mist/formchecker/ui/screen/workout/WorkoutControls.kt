@@ -321,7 +321,6 @@ internal fun CalibrationBar(
     state: WorkoutUiState,
     onStart: () -> Unit,
     onCancel: () -> Unit,
-    onSelectPrepSeconds: (Int) -> Unit,
     modifier: Modifier = Modifier,
     collapseDetails: Boolean = false,
 ) {
@@ -454,10 +453,6 @@ internal fun CalibrationBar(
                     )
                 }
                 state.calibrationProblems.forEach { CalibrationProblemRow(it) }
-                PrepSecondsPicker(
-                    selected = state.calibrationPrepSeconds,
-                    onSelect = onSelectPrepSeconds,
-                )
                 Button(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
@@ -487,7 +482,12 @@ private fun collapsedNotes(state: WorkoutUiState): List<String> = buildList {
         CalibrationStage.PREPARING -> Unit
         CalibrationStage.COLLECTING -> add(RESTART_NOTE)
         CalibrationStage.READY -> baselineNote(state)?.let(::add)
-        CalibrationStage.NONE -> add(WHY_CALIBRATE)
+        CalibrationStage.NONE -> {
+            add(WHY_CALIBRATE)
+            // 버튼 문구에 "5초 후 시작"이 뜨는데 여기서는 바꿀 수 없다. 어디서 바꾸는지
+            // 말해주지 않으면 사용자는 그 값이 고정된 것으로 읽는다.
+            add(PREP_SECONDS_HINT)
+        }
     }
     addAll(readyPostureNotes(state.readyPosture))
 }
@@ -522,6 +522,10 @@ private const val RESTART_NOTE = "몸이 가려지면 처음부터 다시 세요
  * 걸어가는 동안 세어지는 유령 rep이 막는 이유이므로, **그 이유를 그대로 쓴다** — "왜 못
  * 쓰게 하는가"에 답하지 않으면 사용자는 앱이 까다롭다고만 느낀다.
  */
+/** 준비 시간을 어디서 바꾸는지. 화면에서 선택 줄을 없앴으므로 길을 알려줘야 한다. */
+private const val PREP_SECONDS_HINT =
+    "측정이 시작되기까지의 준비 시간은 설정에서 바꿀 수 있어요."
+
 private const val WHY_CALIBRATE =
     "카메라 앞으로 걸어오는 동안 하지 않은 횟수가 세어져서, 기준 자세를 잡은 뒤부터 " +
         "세기로 했어요. 키와 다리 길이를 알면 앉은 깊이도 더 정확해져요. 3초면 됩니다."
@@ -737,59 +741,6 @@ internal fun InfoNote(
     }
 }
 
-/**
- * 준비 시간 선택.
- *
- * 고를 수 있게 둔 이유: 버튼을 누른 자리와 서야 할 자리 사이의 거리가 사람마다 다르다.
- * 삼각대를 앞에 두고 화면에 손이 닿으면 0초가 맞고, 방 건너편에 두었으면 10초도 짧다.
- * 하나로 고정하면 한쪽은 매번 기다리고 다른 쪽은 매번 실패한다.
- */
-@Composable
-internal fun PrepSecondsPicker(selected: Int, onSelect: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "준비 시간",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextMuted,
-        )
-        CalibrationPrep.OPTIONS.forEach { seconds ->
-            val active = seconds == selected
-            OutlinedButton(
-                onClick = { onSelect(seconds) },
-                modifier = Modifier.height(TouchTarget.minSize),
-                contentPadding = CompactButtonPadding,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = if (active) LimeGreen else TextMuted,
-                ),
-            ) {
-                Text(
-                    if (seconds == 0) "바로" else "${seconds}초",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
-    }
-}
-
-/**
- * 준비 자세 점검 줄.
- *
- * ## 왜 문제와 "못 본 항목"을 함께 보여주는가
- * 문제가 없다고 "준비 자세 좋아요"만 쓰면, 측면 촬영에서 세 항목(발 간격·발끝 방향·좌우
- * 균형)을 아예 재지 않았는데도 다 통과한 것처럼 읽힌다. 재지도 않은 것을 괜찮다고 말하지
- * 않는다 — `SessionReport.notJudged`와 같은 규칙이다.
- *
- * ## 왜 판정을 여기서 하지 않는가
- * 두 운동 화면이 이 컴포저블을 공유한다. 화면에 조건을 넣으면 사용자용과 개발용이 다른
- * 답을 내게 된다([ReadyPosture]가 판정을 독점한다).
- *
- * @param collapseDetails 못 본 항목을 그리지 않는다. 호출부가 [readyPostureNotes]로 같은
- *   목록을 받아 [InfoNote]에 넣는다 — 안내 아이콘을 바에 하나만 두기 위해서다.
- */
 @Composable
 internal fun ReadyPostureRows(posture: ReadyPosture, collapseDetails: Boolean = false) {
     if (posture.framesUsed == 0) return
