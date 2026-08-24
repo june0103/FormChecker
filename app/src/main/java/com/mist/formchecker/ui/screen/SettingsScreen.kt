@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import com.mist.formchecker.data.BodyInput
 import com.mist.formchecker.data.BodyProfile
 import com.mist.formchecker.poseengine.Sex
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -81,7 +82,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val prepSeconds by viewModel.prepSeconds.collectAsStateWithLifecycle()
-    val bodyProfile by viewModel.bodyProfile.collectAsStateWithLifecycle()
+    val bodyInput by viewModel.bodyInput.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -93,8 +94,9 @@ fun SettingsScreen(
         Text("설정", style = MaterialTheme.typography.headlineLarge)
 
         BodyProfileSection(
-            saved = bodyProfile,
-            onSave = viewModel::saveBodyProfile,
+            input = bodyInput,
+            onSaveHeight = viewModel::saveHeight,
+            onSaveWeight = viewModel::saveWeight,
             onSaveAge = viewModel::saveAge,
             onSaveSex = viewModel::saveSex,
         )
@@ -254,21 +256,27 @@ private fun SettingsSectionHeader(
  * "17"까지 친 순간 키가 17cm로 저장되면 안 된다. 화면이 글자를 들고 있고, 숫자로 읽히고
  * 범위 안일 때만 저장한다. 비우면 지운다 — 한 번 넣으면 못 지우는 신체 정보는 사용자가
  * 되돌릴 수 없다.
+ *
+ * ## 칸마다 자기 값만 저장한다
+ * 예전에는 키·몸무게를 한 번에 저장했고, 그래서 **한쪽 칸이 비어 있으면 다른 쪽 저장이 그
+ * 값을 지웠다.** 키 175만 저장된 상태에서 몸무게를 입력하면 키가 사라졌다(실기기 재현).
+ * 지금은 칸이 각자 자기 값만 쓴다.
  */
 @Composable
 private fun BodyProfileSection(
-    saved: BodyProfile?,
-    onSave: (heightCm: Float?, weightKg: Float?) -> Unit,
+    input: BodyInput?,
+    onSaveHeight: (Float?) -> Unit,
+    onSaveWeight: (Float?) -> Unit,
     onSaveAge: (Int?) -> Unit,
     onSaveSex: (Sex?) -> Unit,
 ) {
-    // 저장된 값이 바뀌면(다른 화면에서 지웠다면) 입력칸도 따라간다. key로 saved를 주면
-    // 사용자가 타이핑하는 중에 리셋되므로, 처음 한 번만 채운다.
-    var height by remember(saved == null) { mutableStateOf(saved?.heightCm.toField()) }
-    var weight by remember(saved == null) { mutableStateOf(saved?.weightKg.toField()) }
-    var age by remember(saved == null) { mutableStateOf(saved?.age?.toString() ?: "") }
-
-    fun commit() = onSave(height.toMeasure(), weight.toMeasure())
+    // 디스크를 읽고 나서 한 번만 채운다. key가 input 자체면 사용자가 타이핑하는 중에
+    // 리셋되고, key를 안 주면 첫 프레임의 "아직 못 읽음"(null) 상태로 굳는다 — 그게 저장된
+    // 값이 안 보이던 원인이었다.
+    val loaded = input != null
+    var height by remember(loaded) { mutableStateOf(input?.heightCm.toField()) }
+    var weight by remember(loaded) { mutableStateOf(input?.weightKg.toField()) }
+    var age by remember(loaded) { mutableStateOf(input?.age?.toString() ?: "") }
 
     SettingsSectionHeader(
         title = "내 정보",
@@ -285,7 +293,7 @@ private fun BodyProfileSection(
     ) {
         OutlinedTextField(
             value = height,
-            onValueChange = { height = it.filterMeasure(); commit() },
+            onValueChange = { height = it.filterMeasure(); onSaveHeight(height.toMeasure()) },
             label = { Text("키 (cm)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -294,7 +302,7 @@ private fun BodyProfileSection(
         )
         OutlinedTextField(
             value = weight,
-            onValueChange = { weight = it.filterMeasure(); commit() },
+            onValueChange = { weight = it.filterMeasure(); onSaveWeight(weight.toMeasure()) },
             label = { Text("몸무게 (kg)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -303,16 +311,19 @@ private fun BodyProfileSection(
         )
     }
 
+    // 상태는 저장된 값으로 판단한다 — 입력칸 글자로 보면 범위를 벗어나 저장되지 않은
+    // 값("300")도 계산되는 것처럼 보인다.
+    val canCalculate = input?.profile != null
     Text(
         text = when {
-            saved != null -> "열량을 계산할 수 있어요."
+            canCalculate -> "열량을 계산할 수 있어요."
             height.isEmpty() && weight.isEmpty() -> "지금은 열량을 계산하지 않아요."
             // 하나만 넣은 상태. 왜 아직 안 되는지 말해야 한다 — 넣었는데 안 된다고
             // 읽히면 고장으로 보인다.
             else -> "둘 다 넣어야 열량을 계산할 수 있어요."
         },
         style = MaterialTheme.typography.labelSmall,
-        color = if (saved != null) LimeGreen else TextMuted,
+        color = if (canCalculate) LimeGreen else TextMuted,
     )
 
     // ── 선택: 나이·성별 ─────────────────────────────────────
@@ -352,7 +363,7 @@ private fun BodyProfileSection(
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             Sex.entries.forEach { option ->
-                val selected = saved?.sex == option
+                val selected = input?.sex == option
                 val label = if (option == Sex.MALE) "남성" else "여성"
                 val press = { onSaveSex(if (selected) null else option) }
                 if (selected) {

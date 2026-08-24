@@ -3,6 +3,7 @@ package com.mist.formchecker.ui.screen
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mist.formchecker.data.AppSettings
+import com.mist.formchecker.data.BodyInput
 import com.mist.formchecker.data.BodyProfile
 import com.mist.formchecker.poseengine.Sex
 import com.mist.formchecker.ui.screen.workout.CalibrationPrep
@@ -38,12 +39,21 @@ class SettingsViewModel @Inject constructor(
         )
 
     /**
-     * 저장된 키·몸무게. 둘 다 있을 때만 값이 나온다.
+     * 저장된 신체 정보 **원값**. 반쯤 입력된 상태도 그대로 나온다.
+     *
+     * ## null은 "값이 없다"가 아니라 "아직 못 읽었다"다
+     * 디스크를 읽기 전에는 null이고, 읽고 나면 [BodyInput]이 나온다(네 값이 모두 비어 있을
+     * 수도 있다). 화면이 입력칸을 **한 번만** 채우려면 그 둘을 구분해야 한다 — 구분하지
+     * 않으면 첫 프레임의 빈 값으로 칸을 채운 뒤 다시 채우지 않는다.
+     *
+     * 계산 가능한지는 `bodyInput.value?.profile`로 본다. 원값을 감추면 화면이 저장된 값을
+     * 되보여 줄 수 없고, 되보여 주지 못한 값은 사용자의 다음 입력에 덮어써진다
+     * ([AppSettings.bodyInput] 주석의 실측 사례).
      *
      * 입력 중인 글자는 여기 담지 않는다 — "17"까지 친 순간 키가 17cm로 저장되면 안 된다.
-     * 화면이 자기 입력 상태를 들고 있고, 유효한 값이 됐을 때만 [saveBodyProfile]을 부른다.
+     * 화면이 자기 입력 상태를 들고 있고, 유효한 값이 됐을 때만 [saveHeight]를 부른다.
      */
-    val bodyProfile: StateFlow<BodyProfile?> = settings.bodyProfile
+    val bodyInput: StateFlow<BodyInput?> = settings.bodyInput
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -51,17 +61,23 @@ class SettingsViewModel @Inject constructor(
         )
 
     /**
-     * 키·몸무게를 저장한다. 범위를 벗어난 값은 무시한다.
+     * 키를 저장한다. 범위를 벗어난 값은 무시한다. null이면 지운다.
      *
-     * @param heightCm null이면 지운다.
-     * @param weightKg null이면 지운다.
+     * 몸무게와 따로 저장한다 — 한 번에 둘을 쓰면 한쪽 칸이 비어 있을 때 다른 쪽이 함께
+     * 지워진다([AppSettings.setHeightCm] 참고).
      */
-    fun saveBodyProfile(heightCm: Float?, weightKg: Float?) {
-        // 오타 방어. 700kg이 저장되면 열량이 10배로 나오는데 사용자는 그게 틀렸다는 것을
+    fun saveHeight(heightCm: Float?) {
+        // 오타 방어. 250cm가 저장되면 열량이 부풀려지는데 사용자는 그게 틀렸다는 것을
         // 알 방법이 없다.
         if (heightCm != null && !BodyProfile.heightValid(heightCm)) return
+        viewModelScope.launch { settings.setHeightCm(heightCm) }
+    }
+
+    /** 몸무게를 저장한다. 범위를 벗어난 값은 무시한다. null이면 지운다. */
+    fun saveWeight(weightKg: Float?) {
+        // 700kg이 저장되면 열량이 10배로 나오는데 사용자는 그게 틀렸다는 것을 알 방법이 없다.
         if (weightKg != null && !BodyProfile.weightValid(weightKg)) return
-        viewModelScope.launch { settings.setBodyProfile(heightCm, weightKg) }
+        viewModelScope.launch { settings.setWeightKg(weightKg) }
     }
 
     /** 나이. 범위를 벗어나면 무시한다. null이면 지운다. */

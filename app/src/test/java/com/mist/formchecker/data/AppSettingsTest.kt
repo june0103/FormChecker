@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import com.mist.formchecker.poseengine.Sex
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -94,5 +95,113 @@ class AppSettingsTest {
             AppSettings(PreferenceDataStoreFactory.create(scope = second, produceFile = { file }))
         assertEquals(3, reopened.calibrationPrepSeconds.first())
         second.cancel()
+    }
+
+    // ── 신체 정보: 반쯤 입력된 상태 ──────────────────────────
+    //
+    // 이 묶음 전체가 **실기기에서 데이터를 잃고 나서** 생겼다. 저장소가 키·몸무게를 한 번에
+    // 받고 하나라도 없으면 null만 내보내던 때, 설정 화면은 저장된 값을 되보여 줄 수 없었고
+    // 그래서 빈 칸으로 덮어썼다. 재현: body_height_cm=175만 있는 상태에서 몸무게 70 입력
+    // → 파일에서 body_height_cm이 사라짐.
+
+    /**
+     * **이 테스트가 그 버그다.** 몸무게를 저장해도 키가 남아 있어야 한다.
+     *
+     * 예전 `setBodyProfile(heightCm, weightKg)`는 둘을 함께 썼다. 화면의 키 칸이 비어
+     * 있으면(=저장된 키를 못 받아서 비어 보이면) 몸무게를 넣는 순간 null이 함께 저장돼
+     * 디스크의 키가 지워졌다.
+     */
+    @Test
+    fun `몸무게를 저장해도 키가 지워지지 않는다`() = runTest {
+        val store = settings()
+        store.setHeightCm(175f)
+        store.setWeightKg(70f)
+
+        val input = store.bodyInput.first()
+        assertEquals(175f, input.heightCm!!, 0.01f)
+        assertEquals(70f, input.weightKg!!, 0.01f)
+    }
+
+    /** 반대 방향도 같다. 값마다 자기 것만 쓴다. */
+    @Test
+    fun `키를 저장해도 몸무게가 지워지지 않는다`() = runTest {
+        val store = settings()
+        store.setWeightKg(70f)
+        store.setHeightCm(175f)
+
+        assertEquals(70f, store.bodyInput.first().weightKg!!, 0.01f)
+    }
+
+    /**
+     * 반쯤 입력된 상태가 **원값으로는 보이고** 프로필로는 안 보여야 한다.
+     *
+     * 화면은 원값으로 입력칸을 채우고, 열량 계산은 프로필로 막는다. 이 둘을 하나로 합쳤던
+     * 것이 위 데이터 손실의 원인이었다 — 감춘 상태는 복원할 수 없고, 복원하지 못한 값은
+     * 다음 입력에 덮어써진다.
+     */
+    @Test
+    fun `키만 있으면 원값은 보이고 프로필은 없다`() = runTest {
+        val store = settings()
+        store.setHeightCm(175f)
+
+        val input = store.bodyInput.first()
+        assertEquals(175f, input.heightCm!!, 0.01f)
+        assertNull(input.weightKg)
+        assertNull("키만으로는 열량을 계산할 수 없다", input.profile)
+        assertNull(store.bodyProfile.first())
+    }
+
+    /** 나이·성별만 넣어도 열량은 계산할 수 없다. 게이트는 키·몸무게다. */
+    @Test
+    fun `나이와 성별만으로는 프로필이 없다`() = runTest {
+        val store = settings()
+        store.setAge(35)
+        store.setSex(Sex.FEMALE)
+
+        val input = store.bodyInput.first()
+        assertEquals(35, input.age)
+        assertEquals(Sex.FEMALE, input.sex)
+        assertNull(input.profile)
+    }
+
+    /** 키·몸무게가 둘 다 있으면 프로필이 나오고, 선택값도 함께 실린다. */
+    @Test
+    fun `키와 몸무게가 있으면 프로필이 나온다`() = runTest {
+        val store = settings()
+        store.setHeightCm(175f)
+        store.setWeightKg(70f)
+        store.setAge(35)
+        store.setSex(Sex.MALE)
+
+        val profile = store.bodyProfile.first()!!
+        assertEquals(175f, profile.heightCm, 0.01f)
+        assertEquals(70f, profile.weightKg, 0.01f)
+        assertEquals(35, profile.age)
+        assertEquals(Sex.MALE, profile.sex)
+    }
+
+    /** 지우는 길이 남아 있어야 한다 — 한 번 넣으면 못 지우는 신체 정보는 되돌릴 수 없다. */
+    @Test
+    fun `null을 주면 그 값만 지운다`() = runTest {
+        val store = settings()
+        store.setHeightCm(175f)
+        store.setWeightKg(70f)
+
+        store.setWeightKg(null)
+
+        val input = store.bodyInput.first()
+        assertEquals(175f, input.heightCm!!, 0.01f)
+        assertNull(input.weightKg)
+    }
+
+    /** 저장 전에는 네 값이 모두 없다. 그 상태가 정상이다 — 열량은 부가 기능이다. */
+    @Test
+    fun `저장하기 전에는 신체 정보가 비어 있다`() = runTest {
+        val input = settings().bodyInput.first()
+        assertNull(input.heightCm)
+        assertNull(input.weightKg)
+        assertNull(input.age)
+        assertNull(input.sex)
+        assertNull(input.profile)
     }
 }
