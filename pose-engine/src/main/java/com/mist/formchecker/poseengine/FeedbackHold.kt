@@ -55,11 +55,24 @@ data class HeldWarning(
  * 시간을 밖에서 받는다([update]의 `nowMs`) — 프레임 타임스탬프를 그대로 쓰면 테스트가
  * 실제 시간을 기다리지 않아도 되고, 프레임이 끊긴 구간에서도 계산이 맞는다.
  */
-class FeedbackHold(private val holdMs: Long = DEFAULT_HOLD_MS) {
+class FeedbackHold(
+    private val holdMs: Long = DEFAULT_HOLD_MS,
+    private val shortHoldMs: Long = SHORT_HOLD_MS,
+) {
 
     private class Entry(val warning: FormWarning, val side: Side?, val firstShownAtMs: Long) {
         var lastSeenAtMs: Long = firstShownAtMs
     }
+
+    /**
+     * 이 항목을 얼마나 붙잡을까.
+     *
+     * 항목마다 다른 이유는 **읽어야 하는 시점이 다르기 때문**이다. [DEFAULT_HOLD_MS]는
+     * "최저점에서 난 경고를 다 올라온 뒤에 읽을 수 있어야 한다"에서 나온 값인데,
+     * [SHORT_HOLD_CHECKS]에 있는 항목은 그 조건이 필요 없다.
+     */
+    private fun holdMsFor(check: FormCheck): Long =
+        if (check in SHORT_HOLD_CHECKS) shortHoldMs else holdMs
 
     /** 항목별로 하나씩. 키가 [FormCheck]인 것이 "항목당 하나" 규칙 그 자체다. */
     private val held = mutableMapOf<FormCheck, Entry>()
@@ -73,7 +86,8 @@ class FeedbackHold(private val holdMs: Long = DEFAULT_HOLD_MS) {
      * @param warnings 이 프레임에서 발생한 경고. [SquatFormAnalyzer]가 우선순위 순으로 낸다.
      * @param side 이 프레임의 무릎 편차가 큰 쪽. 무릎 경고에만 붙는다.
      * @param nowMs 프레임 타임스탬프(ms).
-     * @return 우선순위 순([FormWarning] 선언 순서) 목록.
+     * @return **새로 뜬 것이 앞**인 목록(첫 원소가 화면 맨 위). 같은 시각에 뜬 것끼리는
+     *   선언 순서로 가른다. 우선순위 순이 아닌 이유는 아래 정렬부 주석에 있다.
      */
     fun update(
         warnings: List<FormWarning>,
@@ -93,11 +107,37 @@ class FeedbackHold(private val holdMs: Long = DEFAULT_HOLD_MS) {
             held[warning.check] = Entry(warning, side.takeIf { warning.hasSide }, nowMs)
         }
 
-        held.entries.removeAll { (_, entry) -> nowMs - entry.lastSeenAtMs >= holdMs }
+        held.entries.removeAll { (check, entry) ->
+            nowMs - entry.lastSeenAtMs >= holdMsFor(check)
+        }
 
         return held.values
             .map { HeldWarning(it.warning, it.side, it.firstShownAtMs) }
-            .sortedBy { it.warning.ordinal }
+            // **새로 뜬 것이 위다**(첫 원소가 화면 위). 우선순위 순이 아니다.
+            //
+            // ## 왜 도착 순인가
+            // 우선순위 순으로 내면 **새 오류가 자기 순위 자리에 끼어든다** — 낮은 순위면
+            // 목록 아래에 조용히 붙어서 눈에 띄지 않는다. 사용자가 알아야 하는 것은 "방금
+            // 새로 발견됐다"이고, 그건 위치가 아니라 변화로 전달된다.
+            //
+            // ## 기존 줄이 안 움직인다
+            // 화면의 피드백 블록은 **하단 고정**이다(`ExerciseHud`가 `SpaceBetween`이고
+            // 이 블록이 마지막 자식). 그래서 새 줄을 **맨 위에** 넣으면 블록이 위로
+            // 자라기만 하고 이미 떠 있던 줄은 제자리에 있다. 반대로 아래에 붙이면 기존
+            // 줄이 전부 위로 밀려 읽던 줄을 놓친다.
+            //
+            // ## 같은 프레임에 둘이 뜨면 우선순위로 가른다
+            // 첫 프레임에 여러 항목이 함께 나면 시각이 같다. 그때만 선언 순서를 쓰므로
+            // 순서가 프레임마다 흔들리지 않는다.
+            //
+            // 놓치는 것: 가장 중요한 항목이 맨 위에 있다는 보장이 없어진다. 한 줄만 읽는
+            // 사용자는 가장 급한 것 대신 가장 새로운 것을 읽는다. 표시가 항목당 하나로
+            // 제한돼 있고(측면 최대 4줄) 깊이가 시간을 독점하지 않게 된 뒤라 받아들인
+            // 대가다.
+            .sortedWith(
+                compareByDescending<HeldWarning> { it.firstShownAtMs }
+                    .thenBy { it.warning.ordinal },
+            )
     }
 
     /**
@@ -132,6 +172,41 @@ class FeedbackHold(private val holdMs: Long = DEFAULT_HOLD_MS) {
          * 촬영에서 서서 확인하고 조정할 값이다.
          */
         const val DEFAULT_HOLD_MS = 2_000L
+
+        /**
+         * 짧게만 붙잡는 항목.
+         *
+         * ## 깊이가 화면을 계속 차지하고 있었다
+         * `SHALLOW_DEPTH`는 **하강 중 얕은 구간과 상승 중 얕은 구간에서 각각 발화한다** —
+         * 서 있다가 내려가면 `STANDING → SHALLOW → PARALLEL`이고 올라올 때 역순이다.
+         * [DEFAULT_HOLD_MS](2초)가 rep 중앙값(1,725ms)보다 길어서, 하강에서 한 번 뜨면
+         * 최저점과 상승을 덮고 상승에서 다시 갱신된다 — **사실상 연속으로 떠 있었다.**
+         *
+         * 그래서 충분히 깊게 앉는 사람도 "더 깊게 앉으세요"를 계속 보고, 그 사이에 잠깐
+         * 나는 다른 항목이 묻혔다(사용자 신고, 2026-08-24). 화면은 붙잡힌 항목을 **전부**
+         * 그리므로 막힌 것은 아니었지만, 시간을 통째로 차지하면 결과가 같다.
+         *
+         * ## 왜 깊이만인가
+         * [DEFAULT_HOLD_MS]의 근거는 "**최저점에서** 난 경고를 다 올라온 뒤에 읽을 수
+         * 있어야 한다"였다. 무릎·뒤꿈치·상체는 최저점 근방에서 나므로 그 조건이 필요하다.
+         *
+         * 깊이는 다르다 — **지금 이 순간 더 내려가면 되는 지시**라서 다 올라온 뒤까지
+         * 남아 있을 이유가 없고, 놓쳐도 리포트가 말한다. 그리고 rep 판정은 애초에 최저점
+         * 하나로만 하므로([SquatFormAnalyzer] 호출부) 화면 표시가 짧아져도 기록은 안 바뀐다.
+         */
+        val SHORT_HOLD_CHECKS = setOf(FormCheck.DEPTH)
+
+        /**
+         * [SHORT_HOLD_CHECKS]를 붙잡는 시간(ms). ([ThresholdOrigin.PROVISIONAL])
+         *
+         * **상한만 근거가 있다** — 실측 rep 전체 p5가 1,320ms이므로 그보다 짧아야 한 rep의
+         * 표시가 다음 rep으로 넘어가지 않는다. 900ms는 그 아래이면서 하강 p5(612ms)보다
+         * 길어, 하강에서 뜬 경고가 최저점에 닿기 전에 사라지지는 않는다.
+         *
+         * **하한은 모른다.** "떨어져 선 자리에서 0.9초면 읽히는가"는 기기 앞 스크린샷으로
+         * 답할 수 없다([DEFAULT_HOLD_MS]와 같은 한계다). 다음 촬영에서 서서 확인할 값이다.
+         */
+        const val SHORT_HOLD_MS = 900L
     }
 }
 
