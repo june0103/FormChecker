@@ -128,6 +128,7 @@ class SessionReportTest {
                 FormWarning.SHALLOW_DEPTH,
                 FormWarning.EXCESSIVE_LEAN,
                 FormWarning.HEEL_RISE,
+                FormWarning.KNEE_PAST_TOE,
             ),
             byAngle,
         )
