@@ -77,6 +77,23 @@ class SettingsViewModel @Inject constructor(
         )
 
     /**
+     * 자세 판정 기준을 완화했나. 기본값은 꺼짐이다.
+     *
+     * `stateIn`의 초기값도 꺼짐이다 — 디스크 읽기가 끝나기 전에 켜짐으로 보이면 사용자는
+     * 자기가 켜지도 않은 것이 켜져 있다고 읽는다.
+     */
+    val relaxedForm: StateFlow<Boolean> = settings.relaxedForm
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    fun setRelaxedForm(enabled: Boolean) {
+        appScope.launch { settings.setRelaxedForm(enabled) }
+    }
+
+    /**
      * 키를 저장한다. 범위를 벗어난 값은 무시한다. null이면 지운다.
      *
      * 몸무게와 따로 저장한다 — 한 번에 둘을 쓰면 한쪽 칸이 비어 있을 때 다른 쪽이 함께

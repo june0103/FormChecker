@@ -529,7 +529,10 @@ private fun KneeToleranceSelector(
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         Text(
-            text = "무릎 허용폭" + (deviation?.let { "  ·  지금 ${it.formatRatio()}" } ?: "  ·  판정 불가"),
+            // **지금 쓰는 값을 글자로 띄운다.** 버튼 강조만으로는 설정의 "기준 완화"가
+            // 값을 바꿨는지 확인할 수 없다 — 그 토글은 이 화면을 거치지 않고 판정을 바꾼다.
+            text = "무릎 허용폭 ${KneeTolerance.label(selected)}" +
+                (deviation?.let { "  ·  지금 ${it.formatRatio()}" } ?: "  ·  판정 불가"),
             style = MaterialTheme.typography.labelMedium,
             color = TextMuted,
         )

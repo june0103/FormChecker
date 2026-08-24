@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.first
 import com.mist.formchecker.poseengine.Sex
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -203,5 +205,49 @@ class AppSettingsTest {
         assertNull(input.age)
         assertNull(input.sex)
         assertNull(input.profile)
+    }
+
+    // ── 기준 완화 ────────────────────────────────────────────
+
+    /**
+     * **저장 전에는 꺼짐이다.** 확정된 임계값이 기본이어야 하고, 완화는 사용자가 고르는
+     * 것이다 — 반대로 켜져 있으면 아무도 고르지 않은 완화 기준으로 판정이 돌아간다.
+     */
+    @Test
+    fun `기준 완화는 기본이 꺼짐이다`() = runTest {
+        assertFalse(settings().relaxedForm.first())
+    }
+
+    @Test
+    fun `기준 완화를 켜면 남는다`() = runTest {
+        val store = settings()
+        store.setRelaxedForm(true)
+        assertTrue(store.relaxedForm.first())
+    }
+
+    /** 껐다는 사실도 저장돼야 한다 — 지우면 "저장 전"과 같아지므로 결과는 같지만, 명시적으로 끈 것이 유지되는지 확인한다. */
+    @Test
+    fun `기준 완화를 다시 끄면 꺼진다`() = runTest {
+        val store = settings()
+        store.setRelaxedForm(true)
+        store.setRelaxedForm(false)
+        assertFalse(store.relaxedForm.first())
+    }
+
+    /** 켜 둔 상태로 앱을 닫았다 켜면 그대로여야 한다 — 이게 설정인 이유다. */
+    @Test
+    fun `앱을 다시 켜도 기준 완화가 남는다`() = runTest {
+        val file = folder.newFile("relaxed.preferences_pb")
+
+        val first = CoroutineScope(Dispatchers.IO + Job())
+        AppSettings(PreferenceDataStoreFactory.create(scope = first, produceFile = { file }))
+            .setRelaxedForm(true)
+        first.cancel()
+
+        val second = CoroutineScope(Dispatchers.IO + Job())
+        val reopened =
+            AppSettings(PreferenceDataStoreFactory.create(scope = second, produceFile = { file }))
+        assertTrue(reopened.relaxedForm.first())
+        second.cancel()
     }
 }

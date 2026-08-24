@@ -3,6 +3,7 @@ package com.mist.formchecker.data
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -48,6 +49,29 @@ class AppSettings @Inject constructor(
 
     suspend fun setCalibrationPrepSeconds(seconds: Int) {
         store.edit { it[KEY_PREP_SECONDS] = seconds }
+    }
+
+    /**
+     * 자세 판정 기준을 완화할까. 지금은 **무릎–발끝 허용폭**에만 적용된다.
+     *
+     * ## 왜 이 설정이 생겼나
+     * 실제 사용자가 *"맞게 하고 있는 것 같은데 계속 주의를 주니까 거부감이 든다"*고 했다.
+     * 실측 12세션 240 rep을 다시 계산하니 **정상 의도 세션에서도 기본값(0.10)이 62%에
+     * 경고를 냈다.** `FormThresholds.RELAXED_KNEE_TOE_TOLERANCE`(0.15)는 그것을 45%로
+     * 내리면서 모임 검출을 15%까지 유지한다 — 그 값의 근거와 한계는 그쪽 주석에 있다.
+     *
+     * ## 여기만 `Boolean?`이 아니다
+     * 다른 설정은 "저장 안 함"을 null로 내고 호출부가 기본값을 쓴다([calibrationPrepSeconds]).
+     * **여기는 그럴 이유가 없다** — 준비 시간은 0초("바로")가 유효한 선택지라서 "저장 안
+     * 함"과 구분해야 했지만, 토글에는 제3의 상태가 없다. 저장 전과 꺼짐은 동작이 같다.
+     *
+     * 기본값은 **꺼짐**이다. 확정된 임계값이 기본이어야 하고, 완화는 사용자가 고르는 것이다.
+     */
+    val relaxedForm: Flow<Boolean> =
+        store.data.map { it[KEY_RELAXED_FORM] ?: false }
+
+    suspend fun setRelaxedForm(enabled: Boolean) {
+        store.edit { it[KEY_RELAXED_FORM] = enabled }
     }
 
     /**
@@ -128,6 +152,7 @@ class AppSettings @Inject constructor(
         val KEY_WEIGHT_KG = floatPreferencesKey("body_weight_kg")
         val KEY_AGE = intPreferencesKey("body_age")
         val KEY_SEX = stringPreferencesKey("body_sex")
+        val KEY_RELAXED_FORM = booleanPreferencesKey("relaxed_form")
     }
 }
 
