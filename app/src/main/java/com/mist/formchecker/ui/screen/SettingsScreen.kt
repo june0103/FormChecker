@@ -1,6 +1,7 @@
 package com.mist.formchecker.ui.screen
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import com.mist.formchecker.data.BodyInput
@@ -36,6 +40,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.ui.screen.workout.CalibrationPrep
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.LimeGreen
+import com.mist.formchecker.ui.theme.OutlineVariant
+import com.mist.formchecker.ui.theme.SurfaceVariant
 import com.mist.formchecker.ui.theme.Spacing
 import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TouchTarget
@@ -44,13 +50,15 @@ import com.mist.formchecker.ui.theme.TouchTarget
  * 설정.
  *
  * ## 지금 있는 것
- * 내 정보(키·몸무게·나이·성별)와 준비 시간. 내 정보는 소모 열량을 계산하기 위한 것이고,
+ * 기준 완화, 내 정보(키·몸무게·나이·성별), 준비 시간. 기준 완화는 **판정에 실제로 영향을
+ * 주는 유일한 설정**이다([RelaxedFormSection]). 내 정보는 소모 열량을 계산하기 위한 것이고
  * **넣지 않는 것이 정상 상태다.** 준비 시간은 운동 화면에 있던 선택 줄을 옮겨 온 것이다 —
  * 매번 같은 자리에서 찍는 사람에게는 그 줄이 화면만 차지했다.
  *
- * ## 순서는 "얼마나 자주 만지나"다
- * 내 정보가 위, 준비 시간이 아래다. 준비 시간은 한 번 정하면 거의 안 바뀌므로 위에 있으면
- * 매번 지나쳐야 하는 줄이 된다([PrepSecondsSection]).
+ * ## 순서는 "찾으러 올 순서"다
+ * 기준 완화가 맨 위다. 세 항목 다 한 번 정하면 거의 안 바뀌지만, **이 화면을 여는 이유가
+ * 되는 항목**은 다르다 — "자꾸 지적받는다"고 느낀 사람이 설정을 열면 그걸 찾는다. 준비
+ * 시간은 맨 아래다([PrepSecondsSection]).
  *
  * ## 설명을 팝업에 넣는다
  * 항목마다 "왜 이 값을 고르나"를 문단으로 적어 두었더니 화면이 설명문 세 덩이가 됐고, 정작
@@ -83,6 +91,7 @@ fun SettingsScreen(
 ) {
     val prepSeconds by viewModel.prepSeconds.collectAsStateWithLifecycle()
     val bodyInput by viewModel.bodyInput.collectAsStateWithLifecycle()
+    val relaxedForm by viewModel.relaxedForm.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -92,6 +101,11 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
         Text("설정", style = MaterialTheme.typography.headlineLarge)
+
+        RelaxedFormSection(
+            enabled = relaxedForm,
+            onChange = viewModel::setRelaxedForm,
+        )
 
         BodyProfileSection(
             input = bodyInput,
@@ -169,6 +183,96 @@ private fun PrepSecondsSection(
             color = LimeGreen,
         )
     }
+}
+
+/**
+ * 자세 판정 기준 완화 토글.
+ *
+ * ## 왜 이 항목이 생겼나
+ * 실제 사용자가 *"맞게 하고 있는 것 같은데 계속 주의를 주니까 거부감이 든다"*고 했다. 실측
+ * 12세션 240 rep을 다시 계산하니 **정상 의도 세션에서도 기본 기준이 62%에 경고를 냈고**,
+ * 완화 기준은 45%로 내리면서 무릎이 모이는 것을 여전히 잡는다. 근거와 한계는
+ * `FormThresholds.RELAXED_KNEE_TOE_TOLERANCE` 주석에 있다.
+ *
+ * ## 숫자를 화면에 쓰지 않는다
+ * 임계값(0.10 / 0.15)은 설계문서 5.2절에 따라 사용자 화면에 노출하지 않는다. 그 숫자는
+ * 발목 간격으로 정규화한 무차원값이라 사용자가 판단에 쓸 수 없고, 보이면 "0.15가 뭔가"를
+ * 묻게 된다. 개발 화면에는 그대로 띄운다(`KneeTolerance`).
+ *
+ * ## 켜짐/꺼짐을 글자로 쓴다
+ * 스위치 위치만으로 상태를 전달하지 않는다 — 디자인시스템 34행이 색만으로 상태를 전달하지
+ * 말라고 한 것과 같은 이유다. 떨어져서 보거나 색을 구분하기 어려우면 스위치 모양만으로는
+ * 켜졌는지 알기 어렵다.
+ */
+@Composable
+private fun RelaxedFormSection(
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    SettingsSectionHeader(
+        title = "기준 완화",
+        detail = "무릎이 발끝에서 벗어났다고 알려주는 기준을 조금 넉넉하게 잡아요. " +
+            "자세가 맞는데도 자꾸 지적받는다고 느껴지면 켜 보세요.\n\n" +
+            "켜도 무릎이 안쪽으로 모이는 것은 계속 봐 드려요 — 무리한 각도만 넘어가고, " +
+            "확실히 어긋난 자세는 그대로 알려드립니다.\n\n" +
+            "다만 살짝 어긋난 것은 넘어갈 수 있어요. 자세를 정확히 보고 싶을 때는 끄는 " +
+            "편이 맞아요.\n\n" +
+            "지금은 무릎 판정에만 적용되고, 앉은 깊이·상체 숙임·뒤꿈치 들림은 그대로예요.",
+    )
+
+    Row(
+        // **줄 전체가 과녁이다.** 스위치만 누를 수 있으면 폭 180px짜리 과녁이 되고, 실제로
+        // 기기에서 첫 탭이 빗나갔다. `onCheckedChange = null`과 짝이어야 한다 — 둘 다 두면
+        // 접근성 트리에 누를 수 있는 것이 두 개로 잡힌다.
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget.minSize)
+            .toggleable(
+                value = enabled,
+                onValueChange = onChange,
+                role = Role.Switch,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text(
+            // 스위치 옆에 상태를 글자로 둔다. 스위치만으로는 켜졌는지 읽기 어렵다.
+            text = if (enabled) "켜짐" else "꺼짐",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (enabled) LimeGreen else TextMuted,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = enabled,
+            onCheckedChange = null,
+            // ## 꺼짐 상태의 원이 안 보였다
+            // M3 기본값은 꺼짐 thumb에 `outline`(#2E2E38)을 쓰는데, 트랙이
+            // `surfaceVariant`(#24242E)라 **둘의 대비가 1.1:1**이다 — 이 다크 팔레트에서는
+            // 원이 트랙에 묻힌다. 기기에서 실제로 안 보였다.
+            //
+            // 새 색을 만들지 않고 [TextMuted]를 쓴다. `#9A9AA5` vs `#24242E`는 **5.52:1**로
+            // UI 컴포넌트 기준(WCAG 1.4.11 비텍스트 3:1)을 넘는다.
+            //
+            // [TextPrimary](13:1)를 쓰지 않은 이유: 꺼짐이 켜짐처럼 눈에 띄면 상태를
+            // 반대로 읽는다. 보이기만 하면 되고 강조되면 안 된다.
+            colors = SwitchDefaults.colors(
+                uncheckedThumbColor = TextMuted,
+                uncheckedTrackColor = SurfaceVariant,
+                // 트랙 경계도 한 단 밝게 — 원만 밝으면 트랙이 어디까지인지 안 보인다.
+                uncheckedBorderColor = OutlineVariant,
+            ),
+        )
+    }
+
+    Text(
+        text = if (enabled) {
+            "무릎 판정을 넉넉한 기준으로 봐요."
+        } else {
+            "기본 기준으로 봐요."
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = TextMuted,
+    )
 }
 
 /**

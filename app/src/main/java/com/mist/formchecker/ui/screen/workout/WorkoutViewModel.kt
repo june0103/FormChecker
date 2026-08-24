@@ -301,8 +301,19 @@ object KneeTolerance {
     /** `FormThresholds.kneeToeToleranceRatio`의 실제 기본값과 같아야 한다. */
     val DEFAULT: Float = FormThresholds().kneeToeToleranceRatio
 
+    /**
+     * 설정의 "기준 완화"가 켜졌을 때 쓰는 값.
+     *
+     * 근거는 `FormThresholds.RELAXED_KNEE_TOE_TOLERANCE`에 있다 — 여기서 다시 적지 않는다.
+     * 값이 두 곳에 적히면 한쪽만 바뀐다.
+     */
+    val RELAXED: Float = FormThresholds.RELAXED_KNEE_TOE_TOLERANCE
+
     /** 고를 수 있는 값. 첫 항목이 현재 확정값이다. */
-    val OPTIONS: List<Float> = listOf(DEFAULT, 0.125f, 0.15f, 0.20f, 0.25f)
+    val OPTIONS: List<Float> = listOf(DEFAULT, 0.125f, RELAXED, 0.20f, 0.25f)
+
+    /** 설정 토글이 정하는 값. 실서비스에서 쓰이는 두 값은 이것뿐이다. */
+    fun forSetting(relaxed: Boolean): Float = if (relaxed) RELAXED else DEFAULT
 
     /**
      * 화면 표시용. 임계값 숫자를 쓰는 것은 개발 화면이라서 허용된다(설계문서 5.2절).
@@ -400,6 +411,16 @@ class WorkoutViewModel @Inject constructor(
      */
     fun selectKneeToeTolerance(value: Float) {
         if (value !in KneeTolerance.OPTIONS) return
+        applyKneeToeTolerance(value)
+    }
+
+    /**
+     * 허용폭을 실제로 갈아끼운다. 설정 토글([AppSettings.relaxedForm])과 개발 화면 버튼이
+     * 공유하는 한 경로다 — 둘이 각자 갈아끼우면 한쪽이 화면 상태만 바꾸고 판정은 그대로인
+     * 상태가 생긴다.
+     */
+    private fun applyKneeToeTolerance(value: Float) {
+        if (value == _uiState.value.kneeToeTolerance) return
         config = config.copy(form = config.form.copy(kneeToeToleranceRatio = value))
         formAnalyzer = SquatFormAnalyzer(config)
         // 붙잡아 둔 경고는 옛 기준으로 낸 것이다. 남겨두면 새 기준에서는 안 뜰 경고가
@@ -573,6 +594,17 @@ class WorkoutViewModel @Inject constructor(
                 if (value != _uiState.value.calibrationPrepSeconds) {
                     _uiState.update { it.copy(calibrationPrepSeconds = value) }
                 }
+            }
+        }
+
+        // 기준 완화 토글. 설정을 바꾸면 이 화면을 다시 들어가지 않고 반영된다.
+        //
+        // **개발 화면의 허용폭 버튼과 충돌하지 않는다** — 이 flow는 설정이 실제로 바뀔 때만
+        // 다시 흘러오므로(DataStore가 값 변경 시 emit), 버튼으로 다른 값을 골라 둔 상태가
+        // 설정 emit 때문에 되돌아가지 않는다. 설정을 바꾸면 그때는 설정이 이긴다.
+        viewModelScope.launch {
+            settings.relaxedForm.collect { relaxed ->
+                applyKneeToeTolerance(KneeTolerance.forSetting(relaxed))
             }
         }
     }
