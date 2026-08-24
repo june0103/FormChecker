@@ -707,14 +707,6 @@ class WorkoutViewModel @Inject constructor(
             features = features,
         )
 
-        // 프레임마다 부른다 — 경고가 없는 프레임에서 만료가 일어나므로, 있을 때만 부르면
-        // 마지막 경고가 영원히 남는다.
-        val heldWarnings = feedbackHold.update(
-            warnings = form.warnings,
-            side = form.kneeToeSide,
-            nowMs = result.timestampMs,
-        )
-
         // 스무딩은 항상 먹인다 — 카운팅이 켜지는 순간 EMA·중앙값 창이 차 있어야 첫 rep이
         // 지연 없이 잡힌다. 상태머신에 넣을지만 게이트한다.
         val repFrame = buildRepFrame(result, form)
@@ -746,10 +738,35 @@ class WorkoutViewModel @Inject constructor(
             repWorstKnee = null
             repWarningPhases.clear()
         }
+        // rep 구간 안인가. 저장과 표시가 **같은 게이트**를 쓴다.
+        val inRep = stateMachine.state.isInRep
+
+        // ## 화면에도 rep 구간 게이트를 먹인다
+        //
+        // 저장 경로에는 처음부터 이 게이트가 있었는데(아래 `if (inRep)`) 화면에는 없었다.
+        // 그래서 **가만히 서 있어도 "양발로 고르게 일어서세요"가 떴다** — 서 있는 사람에게
+        // 일어서라고 말하는 문구다(사용자 신고, 2026-08-24).
+        //
+        // 근거는 임계값의 출처다. `hipShiftLimit`(0.10)은 **정상 의도 9명 794프레임의
+        // 최저점 분포**에서 뽑았고, 무릎 쪽도 최저점 253 rep에서 뽑았다. 선 자세 프레임에
+        // 그 값을 대는 것은 **도출 범위 밖에서 판정하는 것**이다 — 무릎이 깊이 게이트
+        // 없이는 선 자세에서 초과율 100%였던 것과 같은 종류의 오류다.
+        //
+        // 상태머신을 돌린 **뒤에** 판단한다. 앞에서 하면 이전 프레임의 상태로 게이트해서
+        // rep 시작·종료 프레임이 한 칸씩 밀린다.
+        //
+        // 경고가 없어도 `update`는 매 프레임 부른다 — 만료가 거기서 일어나므로, 건너뛰면
+        // rep이 끝난 뒤 마지막 경고가 화면에 영원히 남는다.
+        val heldWarnings = feedbackHold.update(
+            warnings = if (inRep) form.warnings else emptyList(),
+            side = form.kneeToeSide,
+            nowMs = result.timestampMs,
+        )
+
         // rep 구간 안이면 경고를 모은다. 선 자세·미인식 구간의 경고는 그 rep의 자세가
         // 아니므로 넣지 않는다. Completed가 뜬 프레임은 이미 STANDING으로 넘어가 있지만,
         // 그 직전 ASCENDING 프레임들이 이미 반영돼 있어 놓치는 것이 없다.
-        if (stateMachine.state in REP_PHASES) {
+        if (inRep) {
             repWarnings += form.warnings
             // 어느 구간에서 났는지 함께 남긴다. 같은 rep에서 두 방향이 다른 구간에 나면
             // 리포트가 "내려갈 때 벌어지고, 올라올 때 모여요"라고 말할 수 있다.
@@ -1460,18 +1477,18 @@ class WorkoutViewModel @Inject constructor(
     }
 
     private companion object {
-        /** rep 구간으로 취급하는 상태. 선 자세·미인식은 rep 밖이다. */
-        /** 상태머신 상태를 리포트가 쓰는 구간으로 옮긴다. rep 밖이면 null이다. */
+        /**
+         * 상태머신 상태를 리포트가 쓰는 구간으로 옮긴다. rep 밖이면 null이다.
+         *
+         * "rep 안인가"는 [RepState.isInRep]가 답한다 — 예전에는 이 함수의 null 분기와
+         * 별도의 `REP_PHASES` 집합이 같은 사실을 두 번 적고 있었다.
+         */
         private fun phaseOf(state: RepState): RepPhase? = when (state) {
             RepState.DESCENDING -> RepPhase.DESCENDING
             RepState.BOTTOM -> RepPhase.BOTTOM
             RepState.ASCENDING -> RepPhase.ASCENDING
             RepState.IDLE, RepState.STANDING -> null
         }
-
-        private val REP_PHASES = setOf(
-            RepState.DESCENDING, RepState.BOTTOM, RepState.ASCENDING,
-        )
 
         /**
          * 선 자세 유지 시간(ms). 수집 화면과 같은 값이다.
