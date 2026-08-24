@@ -324,14 +324,31 @@ class ReadyPostureTest {
     }
 
     /**
-     * 발 간격 허용폭은 잠정값이다. 이걸로 진행을 막으면 어깨너비보다 좁게 서는 습관이
-     * 있는 사람이 앱을 아예 쓸 수 없다 — 안내는 뜨지만 막지는 않는다.
+     * ⚠ 허용폭이 잠정값인데도 막는다(사용자 요청). 되돌리려면 `ReadyIssue`의
+     * `STANCE_TOO_*`를 `blocking = false`로 바꾸면 되고, 그때 이 테스트가 함께 깨져야 한다.
      */
     @Test
-    fun `발 간격은 안내만 하고 측정을 막지 않는다`() {
-        val result = evaluate(frontPose(ankleHalfWidth = 0.10f))
-        assertTrue(ReadyIssue.STANCE_TOO_NARROW in result.issues)
-        assertTrue(result.blockingIssues.isEmpty())
+    fun `발 간격이 어긋나면 측정을 시작하지 않는다`() {
+        val narrow = evaluate(frontPose(ankleHalfWidth = 0.10f))
+        assertTrue(ReadyIssue.STANCE_TOO_NARROW in narrow.blockingIssues)
+        assertFalse(narrow.readyToMeasure)
+
+        val wide = evaluate(frontPose(ankleHalfWidth = 0.30f))
+        assertTrue(ReadyIssue.STANCE_TOO_WIDE in wide.blockingIssues)
+        assertFalse(wide.readyToMeasure)
+    }
+
+    /**
+     * 측면에서는 발 간격을 아예 재지 못한다. 못 재는 것을 요구하면 측면 촬영으로는
+     * 영원히 시작할 수 없다 — 막는 항목이 늘어난 뒤에도 그 규칙은 유지돼야 한다.
+     */
+    @Test
+    fun `측면에서는 발 간격이 시작을 막지 않는다`() {
+        val result = evaluate(sidePose(), CameraAngle.SIDE)
+        assertEquals(
+            ReadyPosture.NotJudgedReason.CAMERA_ANGLE,
+            result.notJudged[ReadyCheck.STANCE_WIDTH],
+        )
         assertTrue(result.readyToMeasure)
     }
 

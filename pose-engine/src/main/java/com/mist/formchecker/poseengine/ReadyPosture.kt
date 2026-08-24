@@ -56,14 +56,21 @@ enum class ReadyCheck {
  * | 무릎 펴기 | 이미 캘리브레이션 차단 조건이었다 |
  * | 발끝 방향 | 기준점 0이 정의에서 나온다(부호만 본다) |
  * | 좌우 균형 | 실측 12세션 READY에서 0/12 |
+ * | **발 간격** | ⚠ 기준점 1.0은 정의, **허용폭은 잠정값** |
  *
- * | 안 막는다 | 이유 |
- * |---|---|
- * | 발 간격 | 허용폭이 [ThresholdOrigin.PROVISIONAL]이다 |
+ * ## ⚠ 발 간격은 근거가 약한데도 막는다
+ * 처음에는 안내만 했다. 허용폭 0.85~1.35를 "지시 없이 편하게 선" 12세션의 간극에서
+ * 골랐고, 그 밖의 두 세션(0.74·1.77)이 실제로 틀렸다는 증거가 없기 때문이다
+ * ([ReadyThresholds.stanceNarrowLimit]).
  *
- * 발 간격은 "지시 없이 편하게 선" 12세션의 간극에서 경계를 골랐고, 그 밖의 두 세션이
- * 실제로 틀렸다는 증거가 없다([ReadyThresholds.stanceNarrowLimit]). 그 숫자로 진행을 막으면
- * 어깨너비보다 좁게 서는 습관이 있는 사람이 **앱을 아예 쓸 수 없다.** 안내는 그대로 뜬다.
+ * **사용자 요청으로 막는 쪽으로 바꿨다**(2026-08-23). 준비 자세가 어긋난 채로 기준선을
+ * 재면 그 세션 내내 어긋난 자세로 운동한다는 판단이다.
+ *
+ * 대가를 알고 쓴다: **어깨너비보다 좁게(또는 넓게) 서는 습관이 있는 사람은 발을 옮기지
+ * 않으면 운동을 시작할 수 없다.** 그 사람이 실제로 잘못 선 것인지는 검증되지 않았다.
+ * 되돌리려면 이 두 항목의 `blocking`을 false로 바꾸면 된다 — 그게 유일한 변경점이다.
+ *
+ * 기준점 1.0(어깨너비)은 정의에서 나오므로 흔들리지 않는다. 흔들리는 것은 **허용폭**뿐이다.
  */
 enum class ReadyIssue(val check: ReadyCheck, val blocking: Boolean) {
     /** 정면을 골랐는데 옆으로 서 있다. */
@@ -78,11 +85,11 @@ enum class ReadyIssue(val check: ReadyCheck, val blocking: Boolean) {
     /** 무릎이 덜 펴졌다. */
     KNEES_BENT(ReadyCheck.KNEE_STRAIGHT, blocking = true),
 
-    /** 발이 어깨보다 좁다. 허용폭이 잠정값이라 막지 않는다. */
-    STANCE_TOO_NARROW(ReadyCheck.STANCE_WIDTH, blocking = false),
+    /** 발이 어깨보다 좁다. ⚠ 허용폭이 잠정값인데도 막는다 — 위 주석 참고. */
+    STANCE_TOO_NARROW(ReadyCheck.STANCE_WIDTH, blocking = true),
 
-    /** 발이 어깨보다 넓다. 허용폭이 잠정값이라 막지 않는다. */
-    STANCE_TOO_WIDE(ReadyCheck.STANCE_WIDTH, blocking = false),
+    /** 발이 어깨보다 넓다. ⚠ 허용폭이 잠정값인데도 막는다 — 위 주석 참고. */
+    STANCE_TOO_WIDE(ReadyCheck.STANCE_WIDTH, blocking = true),
 
     /** 발끝이 안쪽을 향한다. */
     TOES_INWARD(ReadyCheck.TOE_DIRECTION, blocking = true),
