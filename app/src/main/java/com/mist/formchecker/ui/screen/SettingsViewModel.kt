@@ -5,9 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.mist.formchecker.data.AppSettings
 import com.mist.formchecker.data.BodyInput
 import com.mist.formchecker.data.BodyProfile
+import com.mist.formchecker.di.ApplicationScope
 import com.mist.formchecker.poseengine.Sex
 import com.mist.formchecker.ui.screen.workout.CalibrationPrep
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -15,9 +17,23 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * 설정 화면 상태.
+ *
+ * ## 읽기와 쓰기가 다른 스코프에서 돈다
+ * 읽기([prepSeconds]·[bodyInput])는 `viewModelScope`다 — 화면이 사라지면 구독을 끊는 것이
+ * 맞다. **쓰기는 [appScope]다** — 화면이 사라졌다고 취소되면 안 된다. 이 화면은 글자를 칠
+ * 때마다 저장하므로, 마지막 글자를 치고 곧바로 나가면 `viewModelScope`에서는 그 값이
+ * 사라진다([com.mist.formchecker.di.ApplicationScope] 참고).
+ */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settings: AppSettings,
+    /**
+     * 저장 전용 스코프. **`viewModelScope`를 쓰면 안 된다** — 마지막 입력이 화면을 나가는
+     * 순간 취소된다.
+     */
+    @ApplicationScope private val appScope: CoroutineScope,
 ) : ViewModel() {
 
     /**
@@ -70,31 +86,31 @@ class SettingsViewModel @Inject constructor(
         // 오타 방어. 250cm가 저장되면 열량이 부풀려지는데 사용자는 그게 틀렸다는 것을
         // 알 방법이 없다.
         if (heightCm != null && !BodyProfile.heightValid(heightCm)) return
-        viewModelScope.launch { settings.setHeightCm(heightCm) }
+        appScope.launch { settings.setHeightCm(heightCm) }
     }
 
     /** 몸무게를 저장한다. 범위를 벗어난 값은 무시한다. null이면 지운다. */
     fun saveWeight(weightKg: Float?) {
         // 700kg이 저장되면 열량이 10배로 나오는데 사용자는 그게 틀렸다는 것을 알 방법이 없다.
         if (weightKg != null && !BodyProfile.weightValid(weightKg)) return
-        viewModelScope.launch { settings.setWeightKg(weightKg) }
+        appScope.launch { settings.setWeightKg(weightKg) }
     }
 
     /** 나이. 범위를 벗어나면 무시한다. null이면 지운다. */
     fun saveAge(age: Int?) {
         if (age != null && !BodyProfile.ageValid(age)) return
-        viewModelScope.launch { settings.setAge(age) }
+        appScope.launch { settings.setAge(age) }
     }
 
     /** 성별. null이면 지운다. */
     fun saveSex(sex: Sex?) {
-        viewModelScope.launch { settings.setSex(sex) }
+        appScope.launch { settings.setSex(sex) }
     }
 
     fun selectPrepSeconds(seconds: Int) {
         // 목록 밖의 값이 들어오면 저장하지 않는다. 화면이 목록만 보여주므로 지금은 일어날
         // 수 없지만, 저장된 값은 다음 실행에서도 쓰이므로 여기서 막는 편이 싸다.
         if (seconds !in CalibrationPrep.OPTIONS) return
-        viewModelScope.launch { settings.setCalibrationPrepSeconds(seconds) }
+        appScope.launch { settings.setCalibrationPrepSeconds(seconds) }
     }
 }
