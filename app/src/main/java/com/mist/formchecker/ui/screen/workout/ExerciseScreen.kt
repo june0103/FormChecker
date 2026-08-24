@@ -12,7 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -38,7 +38,6 @@ import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.LimeGreen
-import com.mist.formchecker.ui.theme.Radius
 import com.mist.formchecker.ui.theme.RepCounterDisplay
 import com.mist.formchecker.ui.theme.RepCounterDisplayCompact
 import com.mist.formchecker.ui.theme.RepCounterLabel
@@ -124,23 +123,35 @@ private fun ExerciseContent(
 
     var exitConfirm by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
+    Column(modifier = modifier.fillMaxSize()) {
+        // ── 프리뷰: 상단 고정, 화면 폭 전부 ────────────────────
+        //
+        // ## 왜 좌우 여백을 없앴나
+        // 프리뷰는 **가로에서 먼저 막힌다.** 여백이 16dp일 때 폭 1328px → 높이 1771px가
+        // 상한이었고, 세로로는 184px이 빈 여백으로 버려졌다(실측 1440×3120 기기).
+        // 폭을 화면 전부(1440)로 쓰면 높이가 1920이 되어 **면적이 17.6% 커진다.**
+        // 3:4를 유지하는 한 이게 천장이다 — 세로 공간을 더 확보해도 폭이 1440에서 막혀
+        // 높이가 1920을 넘지 못한다.
+        //
+        // ## 3:4는 모델이 정한 값이다
+        // RTMPose 입력이 192×256 = 정확히 3:4다. 3:4 프레임은 letterbox 패딩이 0으로
+        // 모델 입력을 100% 쓴다. 16:9로 바꾸면 가로를 75%만 쓰고, 하필 정면 판정
+        // (무릎–발끝·골반 쏠림·발 간격)이 전부 수평 측정이라 그 임계값들의 근거가 흔들린다.
+        //
+        // ## 왜 weight를 떼고 상단에 고정했나
+        // 예전에는 `weight(1f)` 안에서 가운데 정렬이었다. 그러면 **아래 글이 늘어날 때마다
+        // 프리뷰가 위아래로 움직인다** — ⓘ를 펼치거나 준비 자세 안내가 여러 줄이 되면
+        // 카메라 화면이 흔들린다. 크기가 고정된 프리뷰를 맨 위에 붙이고, 남는 공간을
+        // 아래가 쓰게 한다.
+        //
+        // 모서리를 둥글게 자르지 않는다 — 화면 끝에 붙으면 카드가 아니라 카메라 화면이다.
         Box(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                // 분석 프레임과 같은 3:4. 다르면 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
+                .aspectRatio(3f / 4f)
+                .background(Color.Black),
         ) {
-            Box(
-                modifier = Modifier
-                    // 분석 프레임과 같은 3:4. 다르면 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
-                    .aspectRatio(3f / 4f, matchHeightConstraintsFirst = true)
-                    .clip(RoundedCornerShape(Radius.lg))
-                    .background(Color.Black),
-            ) {
                 if (analyzer != null) {
                     CameraPreview(
                         analyzer = analyzer,
@@ -160,40 +171,53 @@ private fun ExerciseContent(
                         onBack = { if (state.repCount > 0) exitConfirm = true else onBack() },
                         modifier = Modifier.fillMaxSize(),
                     )
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    }
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        // 촬영 방향 선택 버튼을 없앴다. 기준 자세 창의 다수결이 정한다 —
-        // 사용자가 고를 이유가 없고(자기가 어느 방향으로 서 있는지는 앱이 더 잘 안다),
-        // 고르게 두면 잘못 고른 채로 운동해도 앱이 아무 말 없이 틀린 판정을 낸다.
-        CalibrationBar(
-            state = state,
-            onStart = viewModel::startCalibration,
-            onCancel = viewModel::cancelCalibration,
-            onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
-            // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
-            // 떨어져 서서 쓰는 화면이라, 그 거리에서 못 읽는 글씨는 자리만 차지한다.
-            collapseDetails = true,
-        )
-
-        // 카메라 전환과 뒤로가기는 HUD 좌우 상단으로 올렸다. 이 줄에 남는 것은 세션을
-        // 끝내는 동작 하나뿐이라 폭을 다 쓴다.
+        // ── 아래: 남는 공간을 쓰고, 넘치면 스크롤한다 ──────────
         //
-        // **채운 버튼이 아니라 외곽선이다.** 위의 "기준 자세 재기"도 폭을 다 쓰는데, 둘 다
-        // 채운 버튼이면 같은 크기·같은 색이 위아래로 붙어 잘못 누른다. 그리고 지금 화면의
-        // 다음 할 일은 기준 자세를 재는 것이고, 종료는 언제든 빠져나가는 보조 동작이다.
-        OutlinedButton(
-            // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
-            // 아직 없는 행을 조회하게 된다.
-            onClick = { viewModel.finishSession(onFinish) },
-            modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+        // 프리뷰가 고정 크기가 되면서 아래가 남는 공간을 받는다. 그 공간은 기기마다
+        // 다르고(1440×3120에서 약 900px) 준비 자세 안내가 여러 줄이 되면 넘칠 수 있다.
+        // 스크롤을 주지 않으면 "운동 종료" 버튼이 화면 밖으로 잘린다 — 결과 화면에서
+        // 이미 같은 실패를 겪었다(CLAUDE.md의 SessionSummary 항목).
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            Text("운동 종료", style = MaterialTheme.typography.labelLarge)
+            // 촬영 방향 선택 버튼을 없앴다. 기준 자세 창의 다수결이 정한다 —
+            // 사용자가 고를 이유가 없고(자기가 어느 방향으로 서 있는지는 앱이 더 잘 안다),
+            // 고르게 두면 잘못 고른 채로 운동해도 앱이 아무 말 없이 틀린 판정을 낸다.
+            CalibrationBar(
+                state = state,
+                onStart = viewModel::startCalibration,
+                onCancel = viewModel::cancelCalibration,
+                onSelectPrepSeconds = viewModel::selectCalibrationPrepSeconds,
+                // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
+                // 떨어져 서서 쓰는 화면이라, 그 거리에서 못 읽는 글씨는 자리만 차지한다.
+                collapseDetails = true,
+            )
+
+            // 카메라 전환과 뒤로가기는 HUD 좌우 상단으로 올렸다. 이 줄에 남는 것은 세션을
+            // 끝내는 동작 하나뿐이라 폭을 다 쓴다.
+            //
+            // **채운 버튼이 아니라 외곽선이다.** 위의 "기준 자세 재기"도 폭을 다 쓰는데, 둘 다
+            // 채운 버튼이면 같은 크기·같은 색이 위아래로 붙어 잘못 누른다. 그리고 지금 화면의
+            // 다음 할 일은 기준 자세를 재는 것이고, 종료는 언제든 빠져나가는 보조 동작이다.
+            OutlinedButton(
+                // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
+                // 아직 없는 행을 조회하게 된다.
+                onClick = { viewModel.finishSession(onFinish) },
+                modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+            ) {
+                Text("운동 종료", style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 
