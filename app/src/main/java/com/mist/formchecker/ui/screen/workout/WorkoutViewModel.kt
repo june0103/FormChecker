@@ -22,6 +22,7 @@ import com.mist.formchecker.poseengine.DepthLevel
 import com.mist.formchecker.poseengine.FootSample
 import com.mist.formchecker.poseengine.FormCheck
 import com.mist.formchecker.poseengine.FeedbackHold
+import com.mist.formchecker.poseengine.FormThresholds
 import com.mist.formchecker.poseengine.FormWarning
 import com.mist.formchecker.poseengine.HeldWarning
 import com.mist.formchecker.poseengine.KeypointType
@@ -203,6 +204,14 @@ data class WorkoutUiState(
      * 이 값으로 옮기는 것은 다음 단계다 — 옮기기 전에 기기에서 값이 말이 되는지 봐야 한다.
      */
     val features: FrameFeatures? = null,
+    /**
+     * 지금 판정에 쓰는 무릎–발끝 허용폭. **개발 화면에서만 바꿀 수 있다.**
+     *
+     * 화면에 항상 띄우는 이유: 한 세션 안에서 값을 바꾸면 이미 세어진 rep은 옛 값으로
+     * 판정된 것인데 `rep_records`에는 그 사실이 남지 않는다. 최소한 지금 무엇으로 재고
+     * 있는지는 보여야 한다([WorkoutViewModel.selectKneeToeTolerance]).
+     */
+    val kneeToeTolerance: Float = KneeTolerance.DEFAULT,
 ) {
     val isFrontCamera: Boolean get() = lensFacing == CameraSelector.LENS_FACING_FRONT
 
@@ -260,6 +269,50 @@ data class WorkoutUiState(
  * `WorkoutViewModel`의 companion이 아니라 밖에 두는 이유: `WorkoutUiState`의 기본값이
  * 이 값을 참조하는데, 그 데이터 클래스는 ViewModel보다 먼저 선언된다.
  */
+/**
+ * 무릎–발끝 허용폭 실험값.
+ *
+ * ## 왜 고를 수 있게 두었나
+ * 실측 12세션 240 rep을 프로덕션 공식으로 다시 계산하니, **정상 의도 세션에서도** 현재
+ * 값(0.10)이 rep의 62%에 경고를 냈다. 임계값별 경고율은 계산으로 나온다:
+ *
+ * | 허용폭 | 사람내 MAD 배수 | rep 경고율(정상 의도 240 rep) |
+ * |---|---|---|
+ * | 0.10 (현재) | 3× | 62% |
+ * | 0.125 | 3.8× | 50% |
+ * | 0.15 | 4.5× | 45% |
+ * | 0.20 | 6× | 34% |
+ * | 0.25 | 7.5× | 18% |
+ *
+ * **하지만 이 표가 답을 주지 않는다.** 오류 의도 세션이 하나도 없어서 어느 값에서도
+ * "오류를 잡는가"가 미검증이고, 넓힐수록 그 위험이 커진다. 그래서 계산이 아니라 **기기에서
+ * 서서 확인해야** 하는 값이고, 이 목록이 그 자리다.
+ *
+ * ## 왜 0.30을 넣지 않았나
+ * 실측 **선 자세** 편차 중앙값이 +0.309다. 허용폭이 그만큼 커지면 가만히 서 있는 자세의
+ * 어긋남을 정상으로 인정하는 셈이라, 깊이 게이트가 존재하는 이유 자체가 무너진다.
+ * 고를 수 있게 두면 누군가 "0.30에서는 경고가 안 뜨네"로 끝낼 것이다.
+ *
+ * `WorkoutViewModel`의 companion이 아니라 밖에 두는 이유는 [CalibrationPrep]과 같다 —
+ * `WorkoutUiState`의 기본값이 이 값을 참조하고, 그 데이터 클래스가 ViewModel보다 먼저
+ * 선언된다.
+ */
+object KneeTolerance {
+    /** `FormThresholds.kneeToeToleranceRatio`의 실제 기본값과 같아야 한다. */
+    val DEFAULT: Float = FormThresholds().kneeToeToleranceRatio
+
+    /** 고를 수 있는 값. 첫 항목이 현재 확정값이다. */
+    val OPTIONS: List<Float> = listOf(DEFAULT, 0.125f, 0.15f, 0.20f, 0.25f)
+
+    /**
+     * 화면 표시용. 임계값 숫자를 쓰는 것은 개발 화면이라서 허용된다(설계문서 5.2절).
+     *
+     * 소수점 세 자리로 **폭을 맞춘다.** 뒤 0을 떼면 `0.1 / 0.125 / 0.15 / 0.2 / 0.25`가 되어
+     * 자릿수가 들쭉날쭉해지고, 나란히 놓인 버튼에서 값의 크기 순서가 눈에 안 들어온다.
+     */
+    fun label(value: Float): String = "%.3f".format(value)
+}
+
 object CalibrationPrep {
     /** 기본값(초). 팔을 뻗어 버튼을 누르고 물러서는 거리를 기준으로 한 잠정값이다. */
     const val DEFAULT_SECONDS = 5
@@ -321,8 +374,39 @@ class WorkoutViewModel @Inject constructor(
      * AI Hub 실측 분포로 확정한 값을 전달하면 **여기서 설정만 갈아끼우면 되고** 판정
      * 로직은 건드리지 않는다.
      */
-    private val config = SquatAnalyzerConfig()
-    private val formAnalyzer = SquatFormAnalyzer(config)
+    private var config = SquatAnalyzerConfig()
+    private var formAnalyzer = SquatFormAnalyzer(config)
+
+    /**
+     * 무릎–발끝 허용폭을 바꿔 끼운다. **개발 화면 전용 실험 노브다.**
+     *
+     * ## 왜 필요한가
+     * 실측 12세션 240 rep을 다시 계산해 보니 정상 의도 세션에서도 현재 값(0.10)이 rep의
+     * **62%**에 경고를 냈다. 임계값을 옮기면 얼마나 달라지는지는 계산으로 나왔지만
+     * (0.125→50% · 0.15→45% · 0.20→34% · 0.25→18%), **그 숫자가 실제로 서서 스쿼트할 때의
+     * 체감과 맞는지는 계산으로 답할 수 없다.** 같은 사람이 같은 자리에서 값만 바꿔가며
+     * 확인하는 자리가 이것이다.
+     *
+     * ## 저장하지 않는다
+     * ViewModel이 사라지면 기본값으로 돌아간다. 설정에 넣지 않은 이유는 [AppSettings]에
+     * 넣는 값은 사용자가 고르는 값이고, 이건 **측정용 노브**라서다 — 판정 기준이 사용자마다
+     * 다르면 쌓인 `rep_records`를 나중에 해석할 수 없다.
+     *
+     * ## ⚠ 한 세션 안에서 바꾸면 기록이 섞인다
+     * 이미 세어진 rep은 옛 값으로 판정된 것이고, `rep_records`에는 어느 값이었는지 남지
+     * 않는다. 깨끗한 비교가 필요하면 **값마다 세션을 새로 시작할 것.** 그래서 이 함수는
+     * 카운팅을 초기화하지 않는다 — 초기화하면 값을 바꿀 때마다 기준 자세를 다시 재야 해서
+     * 실험 자체가 어려워진다. 대신 화면에 현재 값을 항상 띄운다.
+     */
+    fun selectKneeToeTolerance(value: Float) {
+        if (value !in KneeTolerance.OPTIONS) return
+        config = config.copy(form = config.form.copy(kneeToeToleranceRatio = value))
+        formAnalyzer = SquatFormAnalyzer(config)
+        // 붙잡아 둔 경고는 옛 기준으로 낸 것이다. 남겨두면 새 기준에서는 안 뜰 경고가
+        // 화면에 2초 더 머문다.
+        feedbackHold.reset()
+        _uiState.update { it.copy(kneeToeTolerance = value, heldWarnings = emptyList()) }
+    }
 
     // ── rep 카운팅 ──────────────────────────────────────────
 

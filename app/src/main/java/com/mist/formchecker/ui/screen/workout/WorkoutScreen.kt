@@ -51,6 +51,7 @@ import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackInfoContainer
+import com.mist.formchecker.ui.theme.FeedbackSuccess
 import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.FeedbackWarningContainer
 import com.mist.formchecker.ui.theme.LimeGreen
@@ -63,6 +64,7 @@ import com.mist.formchecker.ui.theme.Spacing
 import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TextPrimary
 import com.mist.formchecker.ui.theme.TouchTarget
+import kotlin.math.abs
 
 /**
  * 운동 화면 — **개발·검증용**. 사용자용은 [ExerciseScreen]이다.
@@ -188,6 +190,12 @@ private fun WorkoutContent(
         PoseModelSelector(
             selected = state.poseModel,
             onSelect = viewModel::selectPoseModel,
+        )
+
+        KneeToleranceSelector(
+            selected = state.kneeToeTolerance,
+            deviation = state.form?.kneeToeDeviation,
+            onSelect = viewModel::selectKneeToeTolerance,
         )
 
         CameraAngleSelector(
@@ -482,6 +490,82 @@ private fun RepEvent.Aborted.Reason.label(): String = when (this) {
     RepEvent.Aborted.Reason.TOO_FAST -> "너무 빠름"
     RepEvent.Aborted.Reason.TIMEOUT -> "시간 초과"
     RepEvent.Aborted.Reason.POSE_LOST -> "자세 놓침"
+}
+
+/**
+ * 무릎–발끝 허용폭 전환 + 지금 값이 어느 임계값을 넘는지.
+ *
+ * ## 왜 다섯 개를 동시에 보여주나
+ * 버튼만 있으면 값마다 스쿼트를 다시 해야 하고, **같은 동작을 다섯 번 똑같이 반복할 수는
+ * 없다** — 비교가 아니라 다섯 번의 다른 측정이 된다. 지금 편차 하나로 다섯 임계값의 결과가
+ * 전부 정해지므로, 한 번 앉는 동안 다섯 개를 나란히 볼 수 있다. 버튼은 "판정을 실제로
+ * 그 값으로 돌려서" rep 경고·소리까지 확인할 때 쓴다.
+ *
+ * 넘음(`초과`)은 판정이 아니라 **비교 표시**다 — `|편차| > 임계값` 한 줄이고, 실제 판정은
+ * [KneeTolerance]로 갈아끼운 `SquatFormAnalyzer`가 낸다. 화면이 자기 판정을 만들면 두
+ * 화면이 다른 답을 낸다(CLAUDE.md).
+ *
+ * 게이트가 닫혀 있으면(선 자세·발 겹침) 편차가 null이라 비교할 것이 없다. 그때는 왜 없는지
+ * 위의 `깊이(정강이)` 값으로 본다.
+ */
+@Composable
+private fun KneeToleranceSelector(
+    selected: Float,
+    deviation: Float?,
+    onSelect: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Text(
+            text = "무릎 허용폭" + (deviation?.let { "  ·  지금 ${it.formatRatio()}" } ?: "  ·  판정 불가"),
+            style = MaterialTheme.typography.labelMedium,
+            color = TextMuted,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
+            KneeTolerance.OPTIONS.forEach { value ->
+                val isSelected = value == selected
+                // 지금 편차가 이 값을 넘는가. 판정이 아니라 비교다.
+                val exceeds = deviation?.let { abs(it) > value }
+                val buttonModifier = Modifier.weight(1f).height(TouchTarget.minSize)
+                val label = buildString {
+                    append(KneeTolerance.label(value))
+                    // 색만으로 전달하지 않는다 (디자인시스템 34행).
+                    when (exceeds) {
+                        true -> append("\n초과")
+                        false -> append("\n통과")
+                        null -> Unit
+                    }
+                }
+                if (isSelected) {
+                    Button(
+                        onClick = { onSelect(value) },
+                        modifier = buttonModifier,
+                        contentPadding = CompactButtonPadding,
+                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                } else {
+                    OutlinedButton(
+                        onClick = { onSelect(value) },
+                        modifier = buttonModifier,
+                        contentPadding = CompactButtonPadding,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = when (exceeds) {
+                                true -> FeedbackWarning
+                                false -> FeedbackSuccess
+                                null -> TextMuted
+                            },
+                        ),
+                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
+    }
 }
 
 /**
