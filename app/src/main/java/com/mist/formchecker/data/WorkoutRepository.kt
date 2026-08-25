@@ -68,8 +68,9 @@ class WorkoutRepository @Inject constructor(
      * id를 클라이언트에서 만드는 이유: 오프라인 큐가 재전송해도 upsert로 멱등 처리되려면
      * 서버가 아니라 클라이언트가 키를 정해야 한다 (설계문서 4장).
      *
-     * rep이 0개여도 저장한다 — "운동을 시작했지만 한 개도 못 셌다"는 것 자체가 기록이고,
-     * 그 세션이 사라지면 왜 카운터가 0이었는지 나중에 물어볼 대상이 없다.
+     * rep이 0개인 세션은 **여기까지 오지 않는다.** 운동 종료 버튼이 그 전에 걸러낸다
+     * ([WorkoutViewModel.finishSession]) — 사용자에게 0회 세션은 기록이 아니라 잘못 누른
+     * 흔적이라서다. 저장소는 그 판단을 하지 않는다: 부르면 그대로 저장한다.
      */
     suspend fun saveSession(
         startedAtMs: Long,

@@ -235,7 +235,11 @@ private fun WorkoutContent(
                 Button(
                     // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
                     // 아직 없는 행을 조회하게 된다.
-                    onClick = { viewModel.finishSession(onFinish) },
+                    // 개발 화면은 묻지 않고 나간다 — 실험 중에 0회로 끝내는 일이 잦고,
+                    // 여기서 확인 창은 방해다. 사용자 화면은 EmptySessionDialog로 알린다.
+                    onClick = {
+                        viewModel.finishSession(onSaved = onFinish, onDiscarded = onBack)
+                    },
                     modifier = Modifier.weight(2f).height(TouchTarget.minSize),
                     contentPadding = CompactButtonPadding,
                 ) {

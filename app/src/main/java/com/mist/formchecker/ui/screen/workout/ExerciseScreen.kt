@@ -124,6 +124,8 @@ private fun ExerciseContent(
     }
 
     var exitConfirm by remember { mutableStateOf(false) }
+    // 한 개도 못 센 채 종료를 눌렀다. 조용히 나가면 "종료했는데 기록에 없다"가 된다.
+    var emptyFinish by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
         // ── 프리뷰: 상단 고정, 화면 폭 전부 ────────────────────
@@ -214,12 +216,30 @@ private fun ExerciseContent(
             OutlinedButton(
                 // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
                 // 아직 없는 행을 조회하게 된다.
-                onClick = { viewModel.finishSession(onFinish) },
+                //
+                // 한 개도 못 셌으면 저장하지 않고 그냥 나간다([WorkoutViewModel.finishSession]).
+                // 결과 화면으로 보내면 "세션을 찾을 수 없습니다"가 뜬다.
+                onClick = {
+                    viewModel.finishSession(
+                        onSaved = onFinish,
+                        onDiscarded = { emptyFinish = true },
+                    )
+                },
                 modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
             ) {
                 Text("운동 종료", style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+
+    if (emptyFinish) {
+        EmptySessionDialog(
+            onDismiss = { emptyFinish = false },
+            onLeave = {
+                emptyFinish = false
+                onBack()
+            },
+        )
     }
 
     if (exitConfirm) {
@@ -232,6 +252,32 @@ private fun ExerciseContent(
             },
         )
     }
+}
+
+/**
+ * 한 번도 세지 못한 채 운동을 끝내려 할 때 알린다.
+ *
+ * ## 왜 그냥 나가지 않나
+ * `운동 종료`를 누른 사람은 기록이 남는다고 기대한다. 0회 세션은 저장하지 않으므로
+ * ([WorkoutViewModel.finishSession]) 아무 말 없이 홈으로 보내면 **"종료했는데 기록에
+ * 없다"**가 된다. 무엇이 일어나는지 말하고, 되돌아갈 길을 함께 준다.
+ *
+ * 카운팅이 아직 안 켜졌거나(기준 자세 미측정) 카메라를 맞추다 만 경우가 대부분이라
+ * "계속하기"가 실제로 유용한 선택지다.
+ */
+@Composable
+private fun EmptySessionDialog(onDismiss: () -> Unit, onLeave: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("아직 한 번도 세지 않았어요") },
+        text = { Text("기록으로 남길 동작이 없어서 저장하지 않아요. 계속하시겠어요?") },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("계속하기") }
+        },
+        dismissButton = {
+            TextButton(onClick = onLeave) { Text("나가기") }
+        },
+    )
 }
 
 /**
