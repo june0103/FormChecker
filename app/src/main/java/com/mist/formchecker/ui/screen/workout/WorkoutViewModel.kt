@@ -433,7 +433,17 @@ class WorkoutViewModel @Inject constructor(
      * 개발 화면의 허용폭 버튼([selectKneeToeTolerance])과 충돌하지 않는다 — 이 flow는 설정이
      * 실제로 바뀔 때만 흘러오므로, 버튼으로 골라 둔 값이 되돌아가지 않는다.
      */
+    /**
+     * 설정 `기준 완화`가 켜져 있나. **rep마다 저장한다** — 나중에 임계값을 재분석할 때
+     * 어느 기준으로 나온 판정인지 알아야 한다([CompletedRepInput]).
+     *
+     * 개발 화면의 허용폭 노브는 이 값을 바꾸지 않는다. 그쪽은 설정이 아니라 실험이고,
+     * 실제로 쓰인 값은 `kneeTolerance`로 따로 남는다.
+     */
+    private var relaxedForm = false
+
     private fun applyRelaxedForm(relaxed: Boolean) {
+        relaxedForm = relaxed
         val form = config.form
         val next = form.copy(
             kneeToeToleranceRatio = KneeTolerance.forSetting(relaxed),
@@ -1016,6 +1026,11 @@ class WorkoutViewModel @Inject constructor(
             validFrameRatio = summary.aggregate.validFrameRatio,
             kneeToeSide = repWorstKnee?.first?.name,
             warningPhases = repWarningPhases.mapValues { it.value.toSet() },
+            // 이 rep을 판정한 기준. 값은 rep이 끝난 시점의 것이다 — 세션 도중에 설정이나
+            // 노브가 바뀌면 그 뒤의 rep부터 다른 값이 남는다.
+            relaxedForm = relaxedForm,
+            kneeTolerance = config.form.kneeToeToleranceRatio,
+            shallowTolerance = config.form.shallowToleranceRatio,
         )
         return repLevelWarnings
     }
@@ -1075,6 +1090,9 @@ class WorkoutViewModel @Inject constructor(
                 poseModel = state.poseModel.label,
                 reps = completedReps.toList(),
                 metrics = metrics,
+                // 나머지 임계값 전부. 손으로 나열하지 않는다 — data class의 문자열
+                // 표현이라 임계값이 늘면 저절로 함께 남는다(`WorkoutSessionEntity`).
+                formThresholds = config.form.toString(),
             )
             onSaved(id)
         }

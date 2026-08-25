@@ -38,6 +38,13 @@ data class CompletedRepInput(
     val kneeToeSide: String?,
     /** 경고 종류별로 문제가 났던 구간. */
     val warningPhases: Map<FormWarning, Set<RepPhase>>,
+    /**
+     * 이 rep을 판정할 때 쓴 기준. **rep마다 다를 수 있다** — 설정의 기준 완화와 개발
+     * 화면의 허용폭 노브가 세션 도중에도 바뀐다(`RepRecordEntity`).
+     */
+    val relaxedForm: Boolean,
+    val kneeTolerance: Float,
+    val shallowTolerance: Float,
 )
 
 /** 세션 성능 지표. 없으면(프레임을 한 장도 못 돌린 경우) null로 넘긴다. */
@@ -80,6 +87,8 @@ class WorkoutRepository @Inject constructor(
         poseModel: String?,
         reps: List<CompletedRepInput>,
         metrics: SessionMetricsInput?,
+        /** 이 세션이 쓴 임계값 전부. 형식은 정하지 않는다(`WorkoutSessionEntity`). */
+        formThresholds: String?,
     ): String {
         val sessionId = UUID.randomUUID().toString()
         val setId = UUID.randomUUID().toString()
@@ -92,6 +101,7 @@ class WorkoutRepository @Inject constructor(
                 poseModel = poseModel,
                 startedAt = startedAtMs,
                 endedAt = endedAtMs,
+                formThresholds = formThresholds,
             ),
             set = WorkoutSetEntity(
                 id = setId,
@@ -157,5 +167,8 @@ class WorkoutRepository @Inject constructor(
         validFrameRatio = validFrameRatio,
         kneeToeSide = kneeToeSide,
         warningPhases = ErrorFlags.encodePhases(warningPhases),
+        relaxedForm = relaxedForm,
+        kneeTolerance = kneeTolerance,
+        shallowTolerance = shallowTolerance,
     )
 }

@@ -58,6 +58,22 @@ data class WorkoutSessionEntity(
     @ColumnInfo(name = "pose_model") val poseModel: String?,
     @ColumnInfo(name = "started_at") val startedAt: Long,
     @ColumnInfo(name = "ended_at") val endedAt: Long?,
+    /**
+     * 이 세션이 쓴 판정 임계값 **전부**의 스냅샷.
+     *
+     * ## rep 컬럼과 나눈 이유
+     * rep마다 달라질 수 있는 값(무릎 허용폭·얕은 쪽 경계·완화 여부)은 rep 행에 있고,
+     * 여기는 **나머지 상수 전체**다. 뒤꿈치 임계값이 0.11에서 0.18로 바뀐 것처럼
+     * 상수는 앱 버전 사이에 바뀌는데, 그걸 남기지 않으면 옛 행을 지금 상수로 읽게 된다.
+     *
+     * ## 형식을 정하지 않는다
+     * `FormThresholds`의 `toString()`을 그대로 담는다. 손으로 필드를 나열하면 **임계값을
+     * 새로 추가한 사람이 여기를 고쳐야 한다는 것을 모른다** — data class의 문자열 표현은
+     * 필드가 늘면 저절로 함께 늘어난다. 사람이 읽고 필요하면 파싱하는 기록용 열이다.
+     *
+     * null이면 기록하지 않던 시절의 세션이다.
+     */
+    @ColumnInfo(name = "form_thresholds") val formThresholds: String? = null,
     @ColumnInfo(name = "sync_status") val syncStatus: SyncStatus = SyncStatus.PENDING,
 )
 
@@ -179,6 +195,40 @@ data class RepRecordEntity(
      * 리포트는 모를 때 구간을 말하지 않고 넘어간다.
      */
     @ColumnInfo(name = "warning_phases") val warningPhases: String? = null,
+
+    // ── 어느 기준으로 판정했나 ─────────────────────────────
+    //
+    // ## 왜 값까지 남기나
+    // 판정 기준이 **rep마다 다를 수 있다.** 사용자가 설정에서 기준 완화를 켜고 끄고,
+    // 개발 화면의 허용폭 노브는 한 세션 안에서도 값을 바꾼다. 그걸 남기지 않으면 나중에
+    // 임계값을 재분석할 때 **어느 기준으로 나온 판정인지 모르는 행**이 섞인다 —
+    // 그 데이터로는 "0.15가 오탐을 줄였나" 같은 질문에 답할 수 없다.
+    //
+    // 켜짐/꺼짐(의도)과 실제 값(결과)을 **둘 다** 남긴다. 노브로 바꾼 경우에는 설정이
+    // 꺼져 있는데도 값이 0.15일 수 있고, 상수의 기본값이 바뀌면 같은 "꺼짐"이 다른 값을
+    // 뜻하게 된다.
+
+    /**
+     * 사용자 설정 `기준 완화`가 켜져 있었나.
+     *
+     * null이면 **기록하지 않던 시절의 행**이다. false(꺼짐)와 구분해야 한다 — null은
+     * "모른다"이고, 모르는 것을 꺼짐으로 세면 그만큼 통계가 틀어진다.
+     */
+    @ColumnInfo(name = "relaxed_form") val relaxedForm: Boolean? = null,
+
+    /**
+     * 무릎 방향(모임/벌어짐) 판정에 쓴 허용폭. `FormThresholds.kneeToeToleranceRatio`.
+     *
+     * 설정(0.10/0.15)뿐 아니라 **개발 화면의 노브**(0.100~0.250)도 이 값을 바꾼다.
+     */
+    @ColumnInfo(name = "knee_tolerance") val kneeTolerance: Float? = null,
+
+    /**
+     * 깊이의 **얕은 쪽** 경계. `FormThresholds.shallowToleranceRatio`.
+     *
+     * 기준 완화가 넓히는 것은 얕은 쪽뿐이다 — 깊음 경계는 그대로다.
+     */
+    @ColumnInfo(name = "shallow_tolerance") val shallowTolerance: Float? = null,
 
     @ColumnInfo(name = "sync_status") val syncStatus: SyncStatus = SyncStatus.PENDING,
 )
