@@ -998,13 +998,31 @@ class WorkoutViewModel @Inject constructor(
     }
 
     /**
-     * 세션을 저장하고 id를 돌려준다. 운동 종료 버튼이 부른다.
+     * 운동을 끝낸다. 종료 버튼이 부른다.
      *
-     * rep이 0개여도 저장한다 — "시작했지만 한 개도 못 셌다"는 것 자체가 기록이고, 그 세션이
-     * 사라지면 왜 카운터가 0이었는지 나중에 물어볼 대상이 없다.
+     * ## 한 개도 못 셌으면 저장하지 않는다
+     * 예전에는 0회도 저장했다 — "시작했지만 한 개도 못 셌다"는 것 자체가 기록이라고 봤다.
+     * 그 판단을 뒤집는다(사용자 요청, 2026-08-25): **사용자에게 0회 세션은 기록이 아니라
+     * 잘못 누른 흔적**이다. 카메라를 맞추다 만 세션, 각도를 바꾸다 끝낸 세션이 기록 목록과
+     * 홈의 세션 수에 그대로 쌓인다.
+     *
+     * 잃는 것은 "왜 0회였나"를 나중에 물어볼 대상이다. 그 질문은 수집 화면(`Capture`)이
+     * 답하는 자리이고, 그쪽은 프레임까지 남기므로 여기서 빈 세션을 남길 이유가 약하다.
+     *
+     * @param onSaved 저장했을 때 세션 id와 함께 불린다.
+     * @param onDiscarded **저장하지 않고** 끝났을 때 불린다. 결과 화면으로 보내면 "세션을
+     *   찾을 수 없습니다"가 뜨므로 호출부가 다른 곳으로 보내야 한다.
      */
-    fun finishSession(onSaved: (String) -> Unit) {
+    fun finishSession(onSaved: (String) -> Unit, onDiscarded: () -> Unit) {
         val state = _uiState.value
+
+        if (completedReps.isEmpty()) {
+            // 종료 신호는 그대로 낸다 — 버튼이 먹혔다는 것은 알려야 한다.
+            cues.play(AudioCues.Cue.SESSION_END)
+            onDiscarded()
+            return
+        }
+
         val samples = inferenceSamples.sorted()
         val metrics = if (analyzedFrameCount > 0) {
             SessionMetricsInput(
