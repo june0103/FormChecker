@@ -126,6 +126,9 @@ private fun ExerciseContent(
     var exitConfirm by remember { mutableStateOf(false) }
     // 한 개도 못 센 채 종료를 눌렀다. 조용히 나가면 "종료했는데 기록에 없다"가 된다.
     var emptyFinish by remember { mutableStateOf(false) }
+    // 버튼으로 연 동작 예시. 처음 들어온 사람에게는 ViewModel이 자동으로 한 번 띄운다.
+    var showExample by remember { mutableStateOf(false) }
+    val autoShowExample by viewModel.showFormExample.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         // ── 프리뷰: 상단 고정, 화면 폭 전부 ────────────────────
@@ -171,6 +174,7 @@ private fun ExerciseContent(
                         state = state,
                         onReset = viewModel::resetRepCount,
                         onToggleCamera = viewModel::toggleCamera,
+                        onShowExample = { showExample = true },
                         // 아이콘이 작아져 실수로 눌릴 수 있다. 센 횟수가 있으면 먼저 묻는다.
                         onBack = { if (state.repCount > 0) exitConfirm = true else onBack() },
                         modifier = Modifier.fillMaxSize(),
@@ -230,6 +234,16 @@ private fun ExerciseContent(
                 Text("운동 종료", style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+
+    if (showExample || autoShowExample) {
+        SquatExampleSheet(
+            onDismiss = {
+                showExample = false
+                // 자동으로 뜬 것이든 버튼으로 연 것이든 한 번 봤으면 본 것이다.
+                viewModel.markFormExampleSeen()
+            },
+        )
     }
 
     if (emptyFinish) {
@@ -330,6 +344,7 @@ private fun ExerciseHud(
     state: WorkoutUiState,
     onReset: () -> Unit,
     onToggleCamera: () -> Unit,
+    onShowExample: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -364,13 +379,23 @@ private fun ExerciseHud(
                     showLabel = false,
                     glyph = { drawBackGlyph(it) },
                 )
-                IconAction(
-                    // 어느 렌즈로 바뀌는지를 이름에 담는다 — "전환"만으로는 지금이 어느
-                    // 쪽인지 알 수 없다.
-                    label = if (state.isFrontCamera) "후면" else "전면",
-                    onClick = onToggleCamera,
-                    glyph = { drawCameraFlipGlyph(it) },
-                )
+                // 오른쪽 위에 둘을 나란히 둔다. **아래 컨트롤 줄에 넣지 않는다** —
+                // 거기는 지금 할 일(기준 자세 재기 → 운동 종료)만 있는 자리이고,
+                // 동작 예시는 시작하기 전에 한 번 보는 것이다.
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    IconAction(
+                        label = "동작 예시",
+                        onClick = onShowExample,
+                        glyph = { drawPlayGlyph(it) },
+                    )
+                    IconAction(
+                        // 어느 렌즈로 바뀌는지를 이름에 담는다 — "전환"만으로는 지금이 어느
+                        // 쪽인지 알 수 없다.
+                        label = if (state.isFrontCamera) "후면" else "전면",
+                        onClick = onToggleCamera,
+                        glyph = { drawCameraFlipGlyph(it) },
+                    )
+                }
             }
 
             Row(verticalAlignment = Alignment.Bottom) {

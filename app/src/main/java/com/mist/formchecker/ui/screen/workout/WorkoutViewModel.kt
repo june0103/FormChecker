@@ -55,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -371,7 +372,7 @@ enum class CalibrationStage {
 class WorkoutViewModel @Inject constructor(
     application: Application,
     private val repository: WorkoutRepository,
-    settings: AppSettings,
+    private val settings: AppSettings,
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(WorkoutUiState())
@@ -642,6 +643,14 @@ class WorkoutViewModel @Inject constructor(
             }
         }
 
+        // 처음 들어온 사람에게 동작 예시를 한 번 띄운다. 한 번만 읽는다 —
+        // collect로 붙들면 "봤다"고 저장하는 순간 다시 흘러와 시트가 닫히자마자 열린다.
+        viewModelScope.launch {
+            if (!settings.squatExampleSeen.first()) {
+                _showFormExample.value = true
+            }
+        }
+
         // 기준 완화 토글. 설정을 바꾸면 이 화면을 다시 들어가지 않고 반영된다.
         //
         // **개발 화면의 허용폭 버튼과 충돌하지 않는다** — 이 flow는 설정이 실제로 바뀔 때만
@@ -650,6 +659,20 @@ class WorkoutViewModel @Inject constructor(
         viewModelScope.launch {
             settings.relaxedForm.collect(::applyRelaxedForm)
         }
+    }
+
+    /**
+     * 동작 예시를 **자동으로** 띄워야 하나. 처음 들어왔을 때만 true다.
+     *
+     * 사용자 화면만 본다 — 개발 화면은 판정 수치를 보는 자리라 안내 시트가 방해다.
+     */
+    private val _showFormExample = MutableStateFlow(false)
+    val showFormExample: StateFlow<Boolean> = _showFormExample.asStateFlow()
+
+    /** 예시를 닫았다. 다음부터는 버튼으로만 연다. */
+    fun markFormExampleSeen() {
+        _showFormExample.value = false
+        viewModelScope.launch { settings.markSquatExampleSeen() }
     }
 
     /**

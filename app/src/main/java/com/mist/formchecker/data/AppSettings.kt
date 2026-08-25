@@ -100,6 +100,24 @@ class AppSettings @Inject constructor(
     }
 
     /**
+     * 스쿼트 동작 예시를 한 번이라도 봤나.
+     *
+     * ## 왜 저장하나
+     * 처음 운동 화면에 들어온 사람에게는 **묻지 않고 한 번 보여준다** — 무엇을 따라 해야
+     * 하는지 모르는 채로 카메라 앞에 서면 앱이 세는 것과 사람이 하는 것이 어긋난다.
+     * 두 번째부터는 방해가 되므로 그때는 버튼으로만 연다.
+     *
+     * 여기 있는 이유는 [relaxedForm]과 같다 — 기록이 아니라 **이 기기의 상태**이고
+     * 동기화 대상이 아니다. 본 적 없음(저장 전)과 껐음이 구분될 필요도 없어 `Boolean`이다.
+     */
+    val squatExampleSeen: Flow<Boolean> =
+        store.data.map { it[KEY_SQUAT_EXAMPLE_SEEN] ?: false }
+
+    suspend fun markSquatExampleSeen() {
+        store.edit { it[KEY_SQUAT_EXAMPLE_SEEN] = true }
+    }
+
+    /**
      * 저장된 신체 정보 **원값**. 없는 값은 null이고, 반쯤 입력된 상태도 그대로 나온다.
      *
      * ## 왜 원값이 필요한가 — 감췄더니 데이터가 지워졌다
@@ -179,6 +197,7 @@ class AppSettings @Inject constructor(
         val KEY_SEX = stringPreferencesKey("body_sex")
         val KEY_RELAXED_FORM = booleanPreferencesKey("relaxed_form")
         val KEY_DAILY_REP_GOAL = intPreferencesKey("daily_rep_goal")
+        val KEY_SQUAT_EXAMPLE_SEEN = booleanPreferencesKey("squat_example_seen")
     }
 }
 

@@ -294,4 +294,19 @@ class AppSettingsTest {
         assertEquals(DailyGoal.RANGE.first, DailyGoal.step(1, -DailyGoal.STEP))
         assertEquals(DailyGoal.RANGE.last, DailyGoal.step(DailyGoal.RANGE.last, DailyGoal.STEP))
     }
+
+    // ── 동작 예시 최초 안내 ───────────────────────────────
+
+    /** 설치 직후에는 아직 못 봤다. 이 값이 false여야 처음 한 번이 뜬다. */
+    @Test
+    fun `처음에는 동작 예시를 본 적이 없다`() = runTest {
+        assertFalse(settings().squatExampleSeen.first())
+    }
+
+    @Test
+    fun `동작 예시를 보면 기억한다`() = runTest {
+        val store = settings()
+        store.markSquatExampleSeen()
+        assertTrue(store.squatExampleSeen.first())
+    }
 }

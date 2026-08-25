@@ -536,6 +536,24 @@ private const val WHY_CALIBRATE =
  *
  * 호를 한 바퀴 다 그리지 않고 틈을 남긴다 — 닫힌 원은 회전으로 읽히지 않는다.
  */
+/**
+ * 재생 삼각형. 동작 예시 영상을 연다.
+ *
+ * 채운 삼각형이다 — 다른 글리프처럼 선으로 그리면 26dp에서 속이 빈 세모가 되어
+ * "재생"보다 "경고"로 먼저 읽힌다.
+ */
+internal fun DrawScope.drawPlayGlyph(color: Color) {
+    val w = size.width
+    val h = size.height
+    val path = Path().apply {
+        moveTo(w * 0.28f, h * 0.16f)
+        lineTo(w * 0.84f, h * 0.50f)
+        lineTo(w * 0.28f, h * 0.84f)
+        close()
+    }
+    drawPath(path = path, color = color)
+}
+
 internal fun DrawScope.drawCameraFlipGlyph(color: Color) {
     val stroke = glyphStrokeWidth
     // 화살촉이 잘리지 않도록 호를 안쪽으로 들여 그린다.
