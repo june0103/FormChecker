@@ -100,6 +100,50 @@ class AppSettings @Inject constructor(
     }
 
     /**
+     * 이 안내를 어느 버전까지 봤나. 본 적 없으면 0이다.
+     *
+     * 화면이 이 값을 직접 읽지 않는다 — 안내를 보여줄지 정하는 것은
+     * `GuideViewModel`이고, 화면은 그 결과만 받는다.
+     */
+    fun guideVersion(key: GuideKey): Flow<Int> =
+        store.data.map { it[intPreferencesKey(key.prefName)] ?: 0 }
+
+    /** 이 안내를 이미 봤나(현재 버전 기준). */
+    fun guideSeen(key: GuideKey): Flow<Boolean> =
+        guideVersion(key).map { it >= key.currentVersion }
+
+    /**
+     * 안내를 끝까지 봤거나 건너뛰었다. **중간에 나간 경우에는 부르지 않는다** —
+     * 도중 종료는 "봤다"가 아니다.
+     */
+    suspend fun markGuideSeen(key: GuideKey) {
+        store.edit { it[intPreferencesKey(key.prefName)] = key.currentVersion }
+    }
+
+    /**
+     * 안내 하나를 "안 본 것"으로 되돌린다. 다음에 그 안내가 뜨는 자리에서 다시 보인다.
+     *
+     * 온보딩처럼 **앱을 켤 때 한 번 뜨는 안내**를 다시 보려면 이 방법뿐이다 — 그 자리는
+     * 설정 화면이 아니라 앱 시작 흐름이라, 지금 열어 보여줄 수가 없다.
+     */
+    suspend fun resetGuide(key: GuideKey) {
+        store.edit { it.remove(intPreferencesKey(key.prefName)) }
+    }
+
+    /**
+     * 화면별 코치마크 상태만 지운다. 다음에 그 화면을 열면 다시 뜬다.
+     *
+     * **온보딩·측정 준비·동작 예시는 건드리지 않는다**([GuideKey.isMenuTutorial]).
+     * 목표·준비 시간·기준 완화·신체 정보도 물론 그대로다 — 지우는 키를 열거해서
+     * 지운다(전체 삭제가 아니다).
+     */
+    suspend fun resetMenuTutorials() {
+        store.edit { prefs ->
+            GuideKey.menuTutorials.forEach { prefs.remove(intPreferencesKey(it.prefName)) }
+        }
+    }
+
+    /**
      * 스쿼트 동작 예시를 한 번이라도 봤나.
      *
      * ## 왜 저장하나

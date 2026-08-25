@@ -309,4 +309,100 @@ class AppSettingsTest {
         store.markSquatExampleSeen()
         assertTrue(store.squatExampleSeen.first())
     }
+
+    // ── 사용자 안내 ───────────────────────────────────────
+
+    /** 설치 직후에는 어떤 안내도 본 적이 없다. */
+    @Test
+    fun `안내를 본 적이 없으면 전부 안 봄이다`() = runTest {
+        val store = settings()
+        GuideKey.entries.forEach { key ->
+            assertEquals(0, store.guideVersion(key).first())
+            assertFalse(store.guideSeen(key).first())
+        }
+    }
+
+    @Test
+    fun `본 안내는 현재 버전으로 기억된다`() = runTest {
+        val store = settings()
+        store.markGuideSeen(GuideKey.ONBOARDING)
+        assertTrue(store.guideSeen(GuideKey.ONBOARDING).first())
+        assertEquals(
+            GuideKey.ONBOARDING.currentVersion,
+            store.guideVersion(GuideKey.ONBOARDING).first(),
+        )
+    }
+
+    /** 한 화면의 안내를 본 것이 다른 화면의 안내를 본 것이 되면 안 된다. */
+    @Test
+    fun `안내 상태는 서로 독립적이다`() = runTest {
+        val store = settings()
+        store.markGuideSeen(GuideKey.HOME_TUTORIAL)
+        assertTrue(store.guideSeen(GuideKey.HOME_TUTORIAL).first())
+        assertFalse(store.guideSeen(GuideKey.WORKOUT_TUTORIAL).first())
+        assertFalse(store.guideSeen(GuideKey.MEASUREMENT_PREP).first())
+    }
+
+    /**
+     * 온보딩 되돌리기 — **다음 실행에 다시 뜨게** 하는 방법이다. 앱을 켤 때 뜨는 안내라
+     * 설정 화면에서 지금 열어 보여줄 자리가 없다.
+     */
+    @Test
+    fun `안내 하나만 되돌릴 수 있다`() = runTest {
+        val store = settings()
+        store.markGuideSeen(GuideKey.ONBOARDING)
+        store.markGuideSeen(GuideKey.HOME_TUTORIAL)
+
+        store.resetGuide(GuideKey.ONBOARDING)
+
+        assertFalse(store.guideSeen(GuideKey.ONBOARDING).first())
+        assertTrue("다른 안내는 그대로여야 한다", store.guideSeen(GuideKey.HOME_TUTORIAL).first())
+    }
+
+    /** 앱 사용법을 되돌려도 사용자 설정과 동작 예시는 그대로다. */
+    @Test
+    fun `온보딩 되돌리기가 다른 상태를 지우지 않는다`() = runTest {
+        val store = settings()
+        store.markGuideSeen(GuideKey.ONBOARDING)
+        store.markSquatExampleSeen()
+        store.setDailyRepGoal(30)
+
+        store.resetGuide(GuideKey.ONBOARDING)
+
+        assertTrue(store.squatExampleSeen.first())
+        assertEquals(30, store.dailyRepGoal.first())
+    }
+
+    /**
+     * **초기화가 지우는 것과 지우지 않는 것.** 화면별 안내만 지우고 온보딩·측정 준비는
+     * 남긴다 — 그리고 사용자가 정한 값(목표·준비 시간·기준 완화·신체 정보)과 동작 예시를
+     * 본 기록은 손대지 않는다.
+     */
+    @Test
+    fun `메뉴 안내 초기화가 다른 상태를 지우지 않는다`() = runTest {
+        val store = settings()
+        store.markGuideSeen(GuideKey.ONBOARDING)
+        store.markGuideSeen(GuideKey.MEASUREMENT_PREP)
+        GuideKey.menuTutorials.forEach { store.markGuideSeen(it) }
+        store.markSquatExampleSeen()
+        store.setDailyRepGoal(30)
+        store.setCalibrationPrepSeconds(10)
+        store.setRelaxedForm(true)
+        store.setHeightCm(175f)
+        store.setWeightKg(70f)
+
+        store.resetMenuTutorials()
+
+        GuideKey.menuTutorials.forEach { key ->
+            assertFalse("$key 는 초기화돼야 한다", store.guideSeen(key).first())
+        }
+        assertTrue(store.guideSeen(GuideKey.ONBOARDING).first())
+        assertTrue(store.guideSeen(GuideKey.MEASUREMENT_PREP).first())
+        assertTrue(store.squatExampleSeen.first())
+        assertEquals(30, store.dailyRepGoal.first())
+        assertEquals(10, store.calibrationPrepSeconds.first())
+        assertTrue(store.relaxedForm.first())
+        assertEquals(175f, store.bodyInput.first().heightCm)
+        assertEquals(70f, store.bodyInput.first().weightKg)
+    }
 }

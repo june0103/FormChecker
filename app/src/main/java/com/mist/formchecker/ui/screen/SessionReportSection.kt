@@ -53,7 +53,15 @@ import com.mist.formchecker.ui.theme.SurfaceCard
  * 말한다 — "자세가 좋아요"는 데이터가 뒷받침하지 못한다.
  */
 @Composable
-fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
+fun SessionReportCard(
+    report: SessionReport,
+    modifier: Modifier = Modifier,
+    /**
+     * 깊이·못 본 항목 덩이에 붙는다. 코치마크가 그 부분만 가리킬 수 있게 열어 둔 자리이고,
+     * **그 내용이 없으면 덩이 자체가 그려지지 않는다** — 안내 단계도 함께 빠진다.
+     */
+    noticeModifier: Modifier = Modifier,
+) {
     val hasFindings = report.findings.isNotEmpty()
 
     Column(
@@ -86,16 +94,22 @@ fun SessionReportCard(report: SessionReport, modifier: Modifier = Modifier) {
             }
         }
 
-        report.depth?.let { DepthLine(it) }
+        if (report.depth != null || report.notJudged.isNotEmpty()) {
+            Column(
+                modifier = noticeModifier,
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+            ) {
+                report.depth?.let { DepthLine(it) }
 
-        if (report.notJudged.isNotEmpty()) {
-            Spacer(Modifier.height(Spacing.xs))
-            Text(
-                // 못 본 것을 말하지 않으면 "피드백이 없다"가 "전부 괜찮다"로 읽힌다.
-                report.notJudged.sentence(),
-                style = MaterialTheme.typography.bodySmall,
-                color = FeedbackInfo,
-            )
+                if (report.notJudged.isNotEmpty()) {
+                    Text(
+                        // 못 본 것을 말하지 않으면 "피드백이 없다"가 "전부 괜찮다"로 읽힌다.
+                        report.notJudged.sentence(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FeedbackInfo,
+                    )
+                }
+            }
         }
     }
 }

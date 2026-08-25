@@ -30,7 +30,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.data.local.SessionListItem
+import com.mist.formchecker.data.GuideKey
 import com.mist.formchecker.ui.component.ScreenHeader
+import com.mist.formchecker.ui.guide.CoachMarkOverlay
+import com.mist.formchecker.ui.guide.CoachMarkState
+import com.mist.formchecker.ui.guide.CoachSteps
+import com.mist.formchecker.ui.guide.GuideViewModel
+import com.mist.formchecker.ui.guide.coachAnchor
+import com.mist.formchecker.ui.guide.rememberCoachMarkState
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackDanger
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -60,8 +67,12 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
     onOpenSession: (String) -> Unit = {},
     viewModel: HistoryViewModel = hiltViewModel(),
+    guide: GuideViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val tutorialSeen by guide.seen(GuideKey.HISTORY_TUTORIAL).collectAsStateWithLifecycle()
+    val coach = rememberCoachMarkState()
 
     Column(modifier = modifier.fillMaxSize().background(BgBase)) {
         // 업로드 대기 배지도 이 줄에 얹는다 — 제목 옆이 원래 자리였고, 따로 한 줄을
@@ -100,6 +111,12 @@ fun HistoryScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
+                // 첫 카드가 어느 것인지 **데이터로** 정한다. 순회 중에 플래그를 뒤집으면
+                // 항목 내용 람다가 재구성될 때마다 다시 실행되어 플래그가 이미 꺼져 있고,
+                // 그러면 앵커가 조용히 사라진다(기기에서 코치마크가 아예 안 떴다).
+                val firstSessionId = state.days.firstOrNull()
+                    ?.sessions?.firstOrNull()?.session?.id
+
                 state.days.forEach { day ->
                     item(key = "day-${day.startMs}", contentType = "header") {
                         DayHeader(day)
@@ -109,10 +126,13 @@ fun HistoryScreen(
                         key = { it.session.id },
                         contentType = { "session" },
                     ) { item ->
+                        // 코치마크는 **첫 카드만** 가리킨다. 카드마다 앵커를 달면 같은 키가
+                        // 여러 번 등록되어 어느 카드를 강조하는지 알 수 없다.
                         SessionRow(
                             item = item,
                             onOpen = { onOpenSession(item.session.id) },
                             onDelete = { viewModel.delete(item.session.id) },
+                            coach = if (item.session.id == firstSessionId) coach else null,
                         )
                     }
                 }
@@ -120,6 +140,16 @@ fun HistoryScreen(
         }
 
         }
+    }
+
+    // 기록이 없으면 코치마크를 띄우지 않는다. 가리킬 카드가 없는데 완료로 저장하면
+    // **정작 기록이 생겼을 때 안내를 못 본다.**
+    if (tutorialSeen == false && !state.isEmpty) {
+        CoachMarkOverlay(
+            state = coach,
+            steps = CoachSteps.history,
+            onFinish = { guide.markSeen(GuideKey.HISTORY_TUTORIAL) },
+        )
     }
 }
 
@@ -170,20 +200,28 @@ private fun DayHeader(day: HistoryDay) {
 }
 
 @Composable
-private fun SessionRow(item: SessionListItem, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun SessionRow(
+    item: SessionListItem,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    coach: CoachMarkState? = null,
+) {
     // 삭제는 두 번 눌러야 한다 — 기록은 지우면 되돌릴 수 없고, 아직 서버 사본도 없다.
     var confirming by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(coach?.let { Modifier.coachAnchor(CoachSteps.History.CARD, it) } ?: Modifier)
             .clip(RoundedCornerShape(Radius.lg))
             .background(SurfaceCard)
             .clickable(onClick = onOpen)
             .padding(Spacing.md),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(coach?.let { Modifier.coachAnchor(CoachSteps.History.OPEN, it) } ?: Modifier),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -221,7 +259,11 @@ private fun SessionRow(item: SessionListItem, onOpen: () -> Unit, onDelete: () -
         }
 
         Spacer(Modifier.height(Spacing.xs))
-        TextButton(onClick = { if (confirming) onDelete() else confirming = true }) {
+        TextButton(
+            onClick = { if (confirming) onDelete() else confirming = true },
+            modifier = coach?.let { Modifier.coachAnchor(CoachSteps.History.DELETE, it) }
+                ?: Modifier,
+        ) {
             Text(
                 if (confirming) "정말 지울까요? 한 번 더 누르시면 삭제돼요" else "삭제",
                 style = MaterialTheme.typography.labelSmall,

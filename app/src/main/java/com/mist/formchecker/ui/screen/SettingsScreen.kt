@@ -46,6 +46,20 @@ import com.mist.formchecker.ui.theme.SurfaceVariant
 import com.mist.formchecker.ui.theme.Spacing
 import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TouchTarget
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.mist.formchecker.data.GuideKey
+import com.mist.formchecker.ui.guide.CoachMarkOverlay
+import com.mist.formchecker.ui.guide.CoachSteps
+import com.mist.formchecker.ui.guide.GuideViewModel
+import com.mist.formchecker.ui.guide.MeasurementPrepSheet
+import com.mist.formchecker.ui.guide.PrepMode
+import com.mist.formchecker.ui.guide.coachAnchor
+import com.mist.formchecker.ui.guide.rememberCoachMarkState
+import com.mist.formchecker.ui.screen.workout.SquatExampleSheet
+import com.mist.formchecker.ui.theme.Radius
+import com.mist.formchecker.ui.theme.TextPrimary
 
 /**
  * 설정.
@@ -87,12 +101,24 @@ import com.mist.formchecker.ui.theme.TouchTarget
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onShowOnboarding: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel(),
+    guide: GuideViewModel = hiltViewModel(),
 ) {
     val prepSeconds by viewModel.prepSeconds.collectAsStateWithLifecycle()
     val bodyInput by viewModel.bodyInput.collectAsStateWithLifecycle()
     val relaxedForm by viewModel.relaxedForm.collectAsStateWithLifecycle()
+
+    val tutorialSeen by guide.seen(GuideKey.SETTINGS_TUTORIAL).collectAsStateWithLifecycle()
+    val coach = rememberCoachMarkState()
+    var showPrep by rememberSaveable { mutableStateOf(false) }
+    var showExample by rememberSaveable { mutableStateOf(false) }
+    // 어떤 초기화를 물어보는 중인가. null이면 묻지 않는 중이다.
+    var confirmReset by rememberSaveable { mutableStateOf<ResetTarget?>(null) }
+    // `다음에 켤 때`를 골랐다. 완료 상태는 되돌리되 **지금 보고 있는 이 화면에서는**
+    // 띄우지 않는다 — 다음에 이 화면을 다시 열 때부터 보인다.
+    var coachSuppressed by rememberSaveable { mutableStateOf(false) }
 
     // 머리줄은 **스크롤 밖**이다 — 모든 화면에서 같은 자리에 있어야 하는데, 스크롤 안에
     // 두면 내려간 만큼 사라진다([ScreenHeader]).
@@ -107,10 +133,17 @@ fun SettingsScreen(
                 .padding(bottom = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
-            RelaxedFormSection(
-                enabled = relaxedForm,
-                onChange = viewModel::setRelaxedForm,
-            )
+            // 코치마크가 가리킬 수 있도록 항목마다 자리를 잡아 준다. 감싸는 Column의
+            // 간격을 바깥과 같게 둬서 보이는 모습은 그대로다.
+            Column(
+                modifier = Modifier.coachAnchor(CoachSteps.Settings.RELAXED, coach),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                RelaxedFormSection(
+                    enabled = relaxedForm,
+                    onChange = viewModel::setRelaxedForm,
+                )
+            }
 
             BodyProfileSection(
                 input = bodyInput,
@@ -118,14 +151,219 @@ fun SettingsScreen(
                 onSaveWeight = viewModel::saveWeight,
                 onSaveAge = viewModel::saveAge,
                 onSaveSex = viewModel::saveSex,
+                bodyModifier = Modifier.coachAnchor(CoachSteps.Settings.BODY, coach),
+                optionalModifier = Modifier.coachAnchor(CoachSteps.Settings.OPTIONAL, coach),
             )
 
-            PrepSecondsSection(
-                selected = prepSeconds,
-                onSelect = viewModel::selectPrepSeconds,
+            Column(
+                modifier = Modifier.coachAnchor(CoachSteps.Settings.PREP, coach),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                PrepSecondsSection(
+                    selected = prepSeconds,
+                    onSelect = viewModel::selectPrepSeconds,
+                )
+            }
+
+            HelpSection(
+                onResetOnboarding = { confirmReset = ResetTarget.ONBOARDING },
+                onOpenPrep = { showPrep = true },
+                onOpenExample = { showExample = true },
+                onResetTutorials = { confirmReset = ResetTarget.MENU_TUTORIALS },
             )
         }
     }
+
+    if (showPrep) {
+        // 다시 보기다. 확인해도 운동이 시작되지 않는다.
+        MeasurementPrepSheet(mode = PrepMode.REVIEW, onDismiss = { showPrep = false })
+    }
+
+    if (showExample) {
+        // 기존 시트를 그대로 쓴다 — 사선 GIF 하나뿐이고 방향 탭이 없다.
+        SquatExampleSheet(onDismiss = { showExample = false })
+    }
+
+    when (confirmReset) {
+        ResetTarget.ONBOARDING -> OnboardingHelpDialog(
+            onDismiss = { confirmReset = null },
+            onShowNow = {
+                confirmReset = null
+                onShowOnboarding()
+            },
+            onShowNextLaunch = {
+                confirmReset = null
+                // 여기서는 화면을 열지 않는다. "안 본 것"으로 되돌리면 다음 실행의
+                // 스플래시 다음에 온보딩이 뜬다.
+                guide.resetGuide(GuideKey.ONBOARDING)
+            },
+        )
+
+        ResetTarget.MENU_TUTORIALS -> MenuTutorialsDialog(
+            onDismiss = { confirmReset = null },
+            onShowNow = {
+                confirmReset = null
+                coachSuppressed = false
+                // 이 화면에서 이미 안내를 닫았다면 그대로는 다시 뜨지 않는다.
+                coach.restart()
+                guide.resetMenuTutorials()
+            },
+            onShowNextTime = {
+                confirmReset = null
+                coachSuppressed = true
+                guide.resetMenuTutorials()
+            },
+        )
+
+        null -> Unit
+    }
+
+    // 다른 안내가 떠 있는 동안에는 코치마크를 겹치지 않는다.
+    if (tutorialSeen == false && !showPrep && !showExample &&
+        confirmReset == null && !coachSuppressed
+    ) {
+        CoachMarkOverlay(
+            state = coach,
+            steps = CoachSteps.settings,
+            onFinish = { guide.markSeen(GuideKey.SETTINGS_TUTORIAL) },
+        )
+    }
+}
+
+/**
+ * 도움말 — 지나간 안내를 다시 여는 자리.
+ *
+ * ## 왜 설정 맨 아래인가
+ * 자주 여는 것이 아니다. 한 번 본 안내를 다시 찾는 사람은 "어딘가에 있겠지" 하고 설정을
+ * 뒤지므로, 자주 바꾸는 항목들을 밀어내지 않는 맨 아래가 맞다.
+ *
+ * ## 다시 보기는 완료 상태를 바꾸지 않는다
+ * 여기서 온보딩이나 측정 준비를 다시 봐도 "처음 본 적 있다"는 사실은 그대로다. 다시 봤다고
+ * 다음 실행에 또 뜨면 안 되고, 확인했다고 운동이 자동으로 시작되지도 않는다.
+ */
+@Composable
+private fun HelpSection(
+    onResetOnboarding: () -> Unit,
+    onOpenPrep: () -> Unit,
+    onOpenExample: () -> Unit,
+    onResetTutorials: () -> Unit,
+) {
+    SettingsSectionHeader(
+        title = "도움말",
+        detail = "처음에 봤던 안내를 다시 볼 수 있어요.\n\n" +
+            "앱 사용법은 지금 바로 보거나, 다음에 앱을 켤 때 다시 보게 할 수 있어요.\n\n" +
+            "메뉴 안내도 마찬가지예요 — `지금 보기`를 고르면 이 설정 화면에서 바로 " +
+            "시작하고, 홈·운동·결과·기록은 그 화면을 열 때 나타나요.\n\n" +
+            "어느 쪽도 목표·신체 정보·준비 시간 같은 설정과 동작 예시를 본 기록은 " +
+            "건드리지 않아요.",
+    )
+
+    HelpRow(
+        title = "앱 사용법",
+        description = "처음 안내 4쪽을 지금 보거나, 다음에 앱을 켤 때 다시 보여줍니다.",
+        onClick = onResetOnboarding,
+    )
+    HelpRow("측정 전 확인사항", "촬영 환경과 복장 확인 목록을 봅니다.", onOpenPrep)
+    HelpRow("스쿼트 동작 예시", "동작 예시 영상을 다시 봅니다.", onOpenExample)
+    HelpRow(
+        title = "메뉴 안내 다시 표시",
+        description = "화면별 사용법 안내를 지금 보거나, 다음에 각 화면을 열 때 " +
+            "다시 보여줍니다.",
+        onClick = onResetTutorials,
+    )
+}
+
+@Composable
+private fun HelpRow(title: String, description: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.md))
+            .clickable(onClick = onClick)
+            .heightIn(min = TouchTarget.minSize)
+            .padding(vertical = Spacing.sm),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+        Text(description, style = MaterialTheme.typography.bodySmall, color = TextMuted)
+    }
+}
+
+/** 무엇을 다시 보게 할 것인가. */
+private enum class ResetTarget { ONBOARDING, MENU_TUTORIALS }
+
+/**
+ * 앱 사용법을 **언제** 볼지 고른다.
+ *
+ * ## 왜 두 갈래인가
+ * 온보딩은 앱을 켤 때 뜨는 안내다. 지금 열어 보여줄 수도 있지만(`지금 보기`), 처음 켰을
+ * 때처럼 흐름 안에서 다시 만나고 싶은 경우도 있다(`다음에 켤 때`). 후자는 화면을 열지
+ * 않으므로 **언제 보이는지 말해주지 않으면** 아무 일도 일어나지 않은 것으로 읽힌다.
+ *
+ * `지금 보기`는 완료 상태를 바꾸지 않는다 — 다시 봤다고 다음 실행에 또 뜨면 안 된다.
+ */
+@Composable
+private fun OnboardingHelpDialog(
+    onDismiss: () -> Unit,
+    onShowNow: () -> Unit,
+    onShowNextLaunch: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("앱 사용법을 다시 볼까요?") },
+        text = {
+            Text(
+                "지금 바로 보거나, 앱을 껐다 켤 때 처음처럼 다시 보여드릴 수 있어요. " +
+                    "목표, 신체 정보, 준비 시간 같은 설정과 지금까지의 기록은 그대로예요.",
+            )
+        },
+        confirmButton = {
+            // 두 선택지를 나란히 둔다. M3가 폭이 모자라면 알아서 줄을 바꾼다.
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                TextButton(onClick = onShowNextLaunch) { Text("다음에 켤 때") }
+                TextButton(onClick = onShowNow) { Text("지금 보기") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
+}
+
+/**
+ * 화면별 안내를 **언제** 볼지 고른다.
+ *
+ * ## 두 갈래가 뜻하는 것
+ * 코치마크는 그 화면 위에 뜨는 안내라, 설정에서 열 수 있는 것은 **지금 보고 있는 설정
+ * 화면의 안내뿐**이다. 그래서 `지금 보기`는 여기서 바로 시작하고 나머지 화면은 열 때
+ * 나타난다. `다음에 켤 때`는 이 화면에서도 띄우지 않고 다음에 다시 들어올 때로 미룬다 —
+ * 설정을 보러 온 사람을 안내로 덮지 않기 위한 선택지다.
+ *
+ * 어느 쪽이든 되돌리는 것은 **화면별 안내뿐**이다(`GuideKey.menuTutorials`).
+ */
+@Composable
+private fun MenuTutorialsDialog(
+    onDismiss: () -> Unit,
+    onShowNow: () -> Unit,
+    onShowNextTime: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("메뉴 안내를 다시 볼까요?") },
+        text = {
+            Text(
+                "홈·운동·결과·기록·설정 화면의 사용법 안내를 다시 보여드려요. " +
+                    "지금 보기를 고르면 이 화면에서 바로 시작하고, 다른 화면은 열 때 " +
+                    "나타나요. 목표, 신체 정보, 준비 시간 같은 설정과 동작 예시를 본 " +
+                    "기록은 그대로예요.",
+            )
+        },
+        confirmButton = {
+            // 두 선택지를 나란히 둔다. M3가 폭이 모자라면 알아서 줄을 바꾼다.
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                TextButton(onClick = onShowNextTime) { Text("다음에 켤 때") }
+                TextButton(onClick = onShowNow) { Text("지금 보기") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
 }
 
 /**
@@ -377,6 +615,8 @@ private fun BodyProfileSection(
     onSaveWeight: (Float?) -> Unit,
     onSaveAge: (Int?) -> Unit,
     onSaveSex: (Sex?) -> Unit,
+    bodyModifier: Modifier = Modifier,
+    optionalModifier: Modifier = Modifier,
 ) {
     // 디스크를 읽고 나서 한 번만 채운다. key가 input 자체면 사용자가 타이핑하는 중에
     // 리셋되고, key를 안 주면 첫 프레임의 "아직 못 읽음"(null) 상태로 굳는다 — 그게 저장된
@@ -386,6 +626,10 @@ private fun BodyProfileSection(
     var weight by remember(loaded) { mutableStateOf(input?.weightKg.toField()) }
     var age by remember(loaded) { mutableStateOf(input?.age?.toString() ?: "") }
 
+    Column(
+        modifier = bodyModifier,
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
     SettingsSectionHeader(
         title = "내 정보",
         detail = "키와 몸무게를 넣으면 운동이 끝난 뒤 소모 열량을 대략 알려드려요. " +
@@ -433,6 +677,7 @@ private fun BodyProfileSection(
         style = MaterialTheme.typography.labelSmall,
         color = if (canCalculate) LimeGreen else TextMuted,
     )
+    }
 
     // ── 선택: 나이·성별 ─────────────────────────────────────
     //
@@ -441,6 +686,10 @@ private fun BodyProfileSection(
     // 키·몸무게만으로도 값이 나오는 편이 낫기 때문이다.
     //
     // "(선택)"을 제목에 남기는 이유: 팝업에 넣으면 안 열어 본 사람은 필수로 읽는다.
+    Column(
+        modifier = optionalModifier,
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
     SettingsSectionHeader(
         title = "나이·성별 (선택)",
         detail = "기초대사량을 구하는 식이 나이와 성별도 씁니다. 넣으면 열량이 더 " +
@@ -488,6 +737,7 @@ private fun BodyProfileSection(
                 }
             }
         }
+    }
     }
 }
 

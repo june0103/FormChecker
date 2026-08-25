@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import com.mist.formchecker.ui.theme.Spacing
 import com.mist.formchecker.ui.theme.TextMuted
 import com.mist.formchecker.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 /**
  * 인앱 스플래시 — 시스템 스플래시가 사라진 **직후**에 재생하는 관절 교정 모션.
@@ -64,17 +66,25 @@ import kotlinx.coroutines.delay
  *
  * @param onFinished 모션이 끝났을 때 한 번만 불린다. 화면 회전·프로세스 재생성으로
  *   모션을 두 번 재생하지 않도록 [rememberSaveable]로 완료 여부를 들고 있다.
+ * @param ready 다음 화면이 정해졌나. **false인 동안에는 끝내지 않는다** — 어디로 갈지
+ *   모르는 채 스플래시를 닫으면 홈이 한 프레임 스쳤다가 온보딩이 덮는다. 읽는 데 걸리는
+ *   시간이 모션보다 짧아 실제로 기다리는 일은 거의 없다.
  */
 @Composable
 fun FormCheckerSplash(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
+    ready: Boolean = true,
 ) {
     // 회전이나 프로세스 재생성으로 이 컴포저블이 다시 만들어져도 모션을 처음부터 다시
     // 재생하지 않는다. 저장되는 것은 "끝났는가" 한 비트뿐이다.
     var finished by rememberSaveable { mutableStateOf(false) }
     // 콜백이 바뀌어도 아래 이펙트를 다시 시작시키지 않는다 — 재시작하면 모션이 다시 돈다.
     val currentOnFinished by rememberUpdatedState(onFinished)
+    // **상태로 감싸야 한다.** 아래 이펙트는 `LaunchedEffect(Unit)`이라 한 번만 돌고,
+    // 파라미터를 그대로 읽으면 처음 값(false)을 붙잡은 채 끝난다 — 갈 곳이 정해져도
+    // 이펙트가 그 사실을 알지 못해 스플래시에서 넘어가지 않는다.
+    val readyState = rememberUpdatedState(ready)
 
     val reduceMotion = rememberReduceMotion()
     val alignment = remember { Animatable(if (finished || reduceMotion) 1f else 0f) }
@@ -104,6 +114,8 @@ fun FormCheckerSplash(
             }
             finished = true
         }
+        // 갈 곳이 정해질 때까지 기다린다.
+        snapshotFlow { readyState.value }.first { it }
         currentOnFinished()
     }
 

@@ -33,7 +33,13 @@ import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
 import com.mist.formchecker.poseengine.SessionCalories
+import com.mist.formchecker.data.GuideKey
 import com.mist.formchecker.ui.component.ScreenHeader
+import com.mist.formchecker.ui.guide.CoachMarkOverlay
+import com.mist.formchecker.ui.guide.CoachSteps
+import com.mist.formchecker.ui.guide.GuideViewModel
+import com.mist.formchecker.ui.guide.coachAnchor
+import com.mist.formchecker.ui.guide.rememberCoachMarkState
 import kotlin.math.roundToInt
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -64,9 +70,13 @@ fun SessionSummaryScreen(
     modifier: Modifier = Modifier,
     showDiagnostics: Boolean = false,
     viewModel: SessionSummaryViewModel = hiltViewModel(),
+    guide: GuideViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val tutorialSeen by guide.seen(GuideKey.SUMMARY_TUTORIAL).collectAsStateWithLifecycle()
+    val coach = rememberCoachMarkState()
 
     Column(modifier = modifier.fillMaxSize().background(BgBase)) {
         // ## 나가는 길이 둘이다 — 뜻이 다르다
@@ -115,10 +125,27 @@ fun SessionSummaryScreen(
                 }
 
                 else -> {
-                    item { OverviewCard(state) }
+                    item {
+                        OverviewCard(
+                            state = state,
+                            modifier = Modifier.coachAnchor(CoachSteps.Summary.OVERVIEW, coach),
+                        )
+                    }
 
                     state.report?.let { report ->
-                        item { SessionReportCard(report) }
+                        item {
+                            SessionReportCard(
+                                report = report,
+                                modifier = Modifier.coachAnchor(
+                                    CoachSteps.Summary.REPORT,
+                                    coach,
+                                ),
+                                noticeModifier = Modifier.coachAnchor(
+                                    CoachSteps.Summary.UNCHECKED,
+                                    coach,
+                                ),
+                            )
+                        }
                     }
 
                     // 성능은 개발 화면에서 넘어왔을 때만 띄운다. 사용자에게는 조치할 수
@@ -131,7 +158,14 @@ fun SessionSummaryScreen(
 
                     if (state.reps.isNotEmpty()) {
                         item {
-                            Text("동작별 기록", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = "동작별 기록",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.coachAnchor(
+                                    CoachSteps.Summary.REP_LIST,
+                                    coach,
+                                ),
+                            )
                         }
                         items(state.reps, key = { it.id }) { RepRow(it) }
                     }
@@ -141,11 +175,24 @@ fun SessionSummaryScreen(
 
         Button(
             onClick = onDone,
-            modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(TouchTarget.minSize)
+                .coachAnchor(CoachSteps.Summary.EXIT, coach),
         ) {
             Text("홈으로")
         }
         }
+    }
+
+    // 데이터가 그려진 뒤에 띄운다. 불러오는 중이거나 세션을 못 찾은 화면에는 가리킬
+    // 것이 없다.
+    if (tutorialSeen == false && !state.loading && state.session != null) {
+        CoachMarkOverlay(
+            state = coach,
+            steps = CoachSteps.summary,
+            onFinish = { guide.markSeen(GuideKey.SUMMARY_TUTORIAL) },
+        )
     }
 }
 
@@ -156,8 +203,8 @@ fun SessionSummaryScreen(
  * "자세가 좋았다"로 읽힌다.** 분모를 보여줘야 그 차이가 드러난다 (설계문서 4.2절).
  */
 @Composable
-private fun OverviewCard(state: SessionSummaryState) {
-    SummaryCard {
+private fun OverviewCard(state: SessionSummaryState, modifier: Modifier = Modifier) {
+    SummaryCard(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -318,11 +365,12 @@ private fun RepRow(rep: RepRecordEntity) {
 
 @Composable
 private fun SummaryCard(
+    modifier: Modifier = Modifier,
     padding: Dp = Spacing.md,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.lg))
             .background(SurfaceCard)

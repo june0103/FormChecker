@@ -20,6 +20,16 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object Splash
 
+/**
+ * 설치 후 첫 실행에 보여주는 4쪽 안내.
+ *
+ * @param review 설정의 도움말에서 **지금 보기**로 열었나. 다시 보기는 완료 상태를 바꾸지
+ *   않고, 끝나면 홈이 아니라 온 자리로 돌아간다. 도움말에는 `다음에 켤 때` 선택지도 있고,
+ *   그쪽은 이 화면을 열지 않고 완료 상태만 되돌린다(`GuideViewModel.resetGuide`).
+ */
+@Serializable
+data class Onboarding(val review: Boolean = false)
+
 @Serializable
 data object Home
 
