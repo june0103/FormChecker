@@ -177,15 +177,31 @@ class HeelRiseTest {
     @Test
     fun `허용폭을 넘으면 경고한다`() {
         val calibration = calibrationOf(sidePose())
-        // 0.20 정강이에 0.03 들림 → 0.15 > 0.11
-        val form = analyze(sidePose(heelLift = 0.03f), calibration)
+        // 0.20 정강이에 0.04 들림 → 0.20 > 0.18
+        val form = analyze(sidePose(heelLift = 0.04f), calibration)
         assertTrue(FormWarning.HEEL_RISE in form.warnings)
+    }
+
+    /**
+     * **실기기에서 관찰된 정상 상한이 여기 들어 있다.** 뒤꿈치가 바닥에 붙어 있는데도
+     * 0.15까지 올라갔다(2026-08-24) — 그 값이 경고를 내면 안 된다. 임계값을 0.11에서
+     * 0.18로 올린 이유가 이것이고, 되돌리려면 이 테스트가 함께 깨져야 한다.
+     */
+    @Test
+    fun `발이 붙어 있을 때 관찰된 상한은 경고하지 않는다`() {
+        val calibration = calibrationOf(sidePose())
+        // 0.20 정강이에 0.03 들림 → 0.15. 예전 임계값(0.11)에서는 오탐이었다.
+        val form = analyze(sidePose(heelLift = 0.03f), calibration)
+        assertFalse(
+            "발이 붙어 있는데 0.15에서 경고하면 안 된다",
+            FormWarning.HEEL_RISE in form.warnings,
+        )
     }
 
     @Test
     fun `허용폭 안이면 경고하지 않는다`() {
         val calibration = calibrationOf(sidePose())
-        // 실측 정상 상한(+0.089)에 해당하는 들림 — 0.20 × 0.089 ≈ 0.0178
+        // 실측 2명의 정상 상한(+0.089)에 해당하는 들림 — 0.20 × 0.089 ≈ 0.0178
         val form = analyze(sidePose(heelLift = 0.0178f), calibration)
         assertFalse(FormWarning.HEEL_RISE in form.warnings)
     }
