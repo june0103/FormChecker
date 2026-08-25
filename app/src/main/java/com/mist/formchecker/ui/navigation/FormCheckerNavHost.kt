@@ -89,6 +89,7 @@ fun FormCheckerNavHost(
                         popUpTo<Home> { inclusive = true }
                     }
                 },
+                onBack = { navController.popBackStack() },
             )
         }
 

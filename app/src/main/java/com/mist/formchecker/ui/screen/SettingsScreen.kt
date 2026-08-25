@@ -37,6 +37,7 @@ import com.mist.formchecker.data.BodyProfile
 import com.mist.formchecker.poseengine.Sex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mist.formchecker.ui.component.ScreenHeader
 import com.mist.formchecker.ui.screen.workout.CalibrationPrep
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.LimeGreen
@@ -93,37 +94,37 @@ fun SettingsScreen(
     val bodyInput by viewModel.bodyInput.collectAsStateWithLifecycle()
     val relaxedForm by viewModel.relaxedForm.collectAsStateWithLifecycle()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Text("설정", style = MaterialTheme.typography.headlineLarge)
+    // 머리줄은 **스크롤 밖**이다 — 모든 화면에서 같은 자리에 있어야 하는데, 스크롤 안에
+    // 두면 내려간 만큼 사라진다([ScreenHeader]).
+    Column(modifier = modifier.fillMaxSize()) {
+        ScreenHeader(onBack = onBack, title = "설정")
 
-        RelaxedFormSection(
-            enabled = relaxedForm,
-            onChange = viewModel::setRelaxedForm,
-        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            RelaxedFormSection(
+                enabled = relaxedForm,
+                onChange = viewModel::setRelaxedForm,
+            )
 
-        BodyProfileSection(
-            input = bodyInput,
-            onSaveHeight = viewModel::saveHeight,
-            onSaveWeight = viewModel::saveWeight,
-            onSaveAge = viewModel::saveAge,
-            onSaveSex = viewModel::saveSex,
-        )
+            BodyProfileSection(
+                input = bodyInput,
+                onSaveHeight = viewModel::saveHeight,
+                onSaveWeight = viewModel::saveWeight,
+                onSaveAge = viewModel::saveAge,
+                onSaveSex = viewModel::saveSex,
+            )
 
-        PrepSecondsSection(
-            selected = prepSeconds,
-            onSelect = viewModel::selectPrepSeconds,
-        )
-
-        OutlinedButton(
-            onClick = onBack,
-            modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-        ) { Text("뒤로", style = MaterialTheme.typography.labelLarge) }
+            PrepSecondsSection(
+                selected = prepSeconds,
+                onSelect = viewModel::selectPrepSeconds,
+            )
+        }
     }
 }
 

@@ -34,6 +34,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.PoseVisibility
 import com.mist.formchecker.ui.screen.PlaceholderAction
+import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.component.drawBackGlyph
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.FeedbackWarning
@@ -303,9 +305,20 @@ private fun ExerciseHud(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                // **위를 맞춘다.** 카메라 전환은 글자를 달고 있어 뒤로가기보다 높이가
+                // 크다 — 가운데로 맞추면 뒤로가기 아이콘이 다른 화면([ScreenHeader])보다
+                // 3dp 내려가서, 화면을 옮길 때마다 아이콘이 미세하게 움직인다.
+                // 두 아이콘은 화면 양 끝에 떨어져 있어 글리프 높이 차이는 눈에 띄지 않는다.
+                verticalAlignment = Alignment.Top,
             ) {
-                HudAction(label = "뒤로", onClick = onBack, glyph = { drawBackGlyph(it) })
-                HudAction(
+                // 꺾쇠는 설명이 필요 없다 — 다른 화면과 같이 글자를 뺐다([ScreenHeader]).
+                IconAction(
+                    label = "뒤로",
+                    onClick = onBack,
+                    showLabel = false,
+                    glyph = { drawBackGlyph(it) },
+                )
+                IconAction(
                     // 어느 렌즈로 바뀌는지를 이름에 담는다 — "전환"만으로는 지금이 어느
                     // 쪽인지 알 수 없다.
                     label = if (state.isFrontCamera) "후면" else "전면",

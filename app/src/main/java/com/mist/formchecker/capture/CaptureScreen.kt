@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -44,6 +44,9 @@ import com.mist.formchecker.poseengine.CaptureView
 import com.mist.formchecker.poseengine.Footwear
 import com.mist.formchecker.poseengine.RepOutliers
 import com.mist.formchecker.poseengine.StandingCalibration
+import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.component.ScreenHeader
+import com.mist.formchecker.ui.component.drawBackGlyph
 import com.mist.formchecker.ui.screen.workout.CameraPreview
 import com.mist.formchecker.ui.screen.workout.SkeletonOverlay
 import com.mist.formchecker.ui.screen.workout.rememberCameraPermissionState
@@ -105,18 +108,18 @@ private fun SetupStage(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Text(
-            "기준 자세 수집",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+    // 머리줄은 스크롤 밖이다 — 모든 화면에서 같은 자리에 있어야 한다([ScreenHeader]).
+    Column(modifier = modifier.fillMaxSize()) {
+        ScreenHeader(onBack = onBack, title = "기준 자세 수집")
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
         Text(
             "올바른 자세 표본을 모아 정상 범위를 만듭니다. " +
                 "임계값이 촬영 조건에 최적화되지 않도록 여러 세션에 나눠 찍어 주세요.",
@@ -236,11 +239,6 @@ private fun SetupStage(
                 style = MaterialTheme.typography.labelLarge,
             )
         }
-        OutlinedButton(
-            onClick = onBack,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget.minSize),
-        ) {
-            Text("뒤로", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -256,17 +254,22 @@ private fun CameraStage(
 ) {
     val permission = rememberCameraPermissionState()
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(Spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
+    // 나가기가 카메라 위로 올라오면서 **화면 모서리**가 됐다 — 스크롤이나 제스처 중에
+    // 실수로 닿기 쉬운 자리다. 촬영 중에 잘못 누르면 지금까지 찍은 프레임이 그대로
+    // 사라진다(저장은 검토 단계에서 일어난다). 운동 화면과 같은 이유로 한 번 묻는다.
+    var exitConfirm by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // 프리뷰는 **화면 폭 전부·상단 고정**이다 — 운동 화면과 같은 구조다(CLAUDE.md).
+        // 예전에는 남는 높이를 받아 3:4로 줄어들어서, 아래 컨트롤이 한 줄 늘 때마다
+        // 카메라가 작아졌다. 촬영자는 이 화면으로 스켈레톤을 확인하므로 그 반대여야 한다.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .aspectRatio(3f / 4f, matchHeightConstraintsFirst = true)
-                .clip(RoundedCornerShape(16.dp))
-                .align(Alignment.CenterHorizontally),
+                .aspectRatio(3f / 4f)
+                // 폭 전부를 쓰므로 둥근 모서리를 두지 않는다 — 화면 가장자리에서
+                // 프리뷰가 깎여 보인다.
+                .background(Color.Black),
         ) {
             if (permission.isGranted) {
                 val analyzer = remember(state.engineReady, state.lensFacing) {
@@ -300,10 +303,92 @@ private fun CameraStage(
             }
 
             StageOverlay(state = state, modifier = Modifier.fillMaxSize())
+
+            // 나가기는 운동 화면 HUD와 **같은 자리**다 — 가로 패딩(sm) + IconAction
+            // 안쪽 패딩(sm)이 다른 화면의 [ScreenHeader]와 같은 16dp를 만든다.
+            // 단계 안내보다 나중에 그려야 스크림 위에 얹힌다.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+            ) {
+                // **"나가기"라고 부른다** — 여기서 나가면 진행 중인 수집이 끝나므로
+                // "뒤로"보다 결과를 말하는 쪽이 맞다. 글자는 빼고 이름만 남긴다.
+                IconAction(
+                    label = "나가기",
+                    onClick = { exitConfirm = true },
+                    showLabel = false,
+                    glyph = { drawBackGlyph(it) },
+                )
+            }
         }
 
-        StageControls(state = state, viewModel = viewModel, onBack = onBack)
+        // 프리뷰 아래는 스크롤이다. 단계마다 컨트롤이 달라 높이가 일정하지 않다.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.sm)
+                .padding(bottom = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            StageControls(state = state, viewModel = viewModel)
+        }
     }
+
+    if (exitConfirm) {
+        ExitCaptureDialog(
+            state = state,
+            onDismiss = { exitConfirm = false },
+            onLeave = {
+                exitConfirm = false
+                onBack()
+            },
+        )
+    }
+}
+
+/**
+ * 수집 도중에 나가려 할 때 묻는다.
+ *
+ * 잃는 것이 단계마다 다르므로 **무엇이 사라지는지를 그때그때 말한다** — "정말 나갈까요?"만
+ * 띄우면 촬영 중인 사람이 프레임이 사라진다는 것을 모른 채 누른다.
+ *
+ * 선택지를 셋으로 늘리지 않는다(운동 화면 `ExitConfirmDialog`와 같은 이유). 저장은 이미
+ * "촬영 종료 → 검토"라는 길이 있다.
+ */
+@Composable
+private fun ExitCaptureDialog(
+    state: CaptureUiState,
+    onDismiss: () -> Unit,
+    onLeave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("수집을 그만둘까요?") },
+        text = {
+            Text(
+                when (state.stage) {
+                    CaptureStage.RECORDING -> {
+                        val counted = state.reps.count { it.counted }
+                        "지금까지 찍은 ${counted}번(프레임 ${state.recordedFrames}개)이 " +
+                            "저장되지 않아요. 남기려면 '촬영 종료'를 눌러 검토까지 마쳐 주세요."
+                    }
+
+                    CaptureStage.CALIBRATING ->
+                        "기준 자세 측정이 취소돼요. 다시 들어오면 처음부터 3초를 다시 서야 해요."
+
+                    else -> "입력한 세션 정보가 사라지고 처음 화면으로 돌아가요."
+                },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("계속하기") }
+        },
+        dismissButton = {
+            TextButton(onClick = onLeave) { Text("저장 안 하고 나가기") }
+        },
+    )
 }
 
 /** 카메라 위에 겹치는 단계별 안내. 촬영자가 자리에서 볼 수 있어야 한다. */
@@ -312,7 +397,14 @@ private fun StageOverlay(state: CaptureUiState, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .background(Scrim.copy(alpha = 0.45f))
-            .padding(Spacing.md),
+            // 위쪽은 나가기 아이콘 자리다. 스크림은 화면 전부를 덮되 글자만 내려온다 —
+            // 여백을 바깥에 주면 아이콘 뒤가 밝은 카메라 영상 그대로가 된다.
+            .padding(
+                start = Spacing.md,
+                end = Spacing.md,
+                bottom = Spacing.md,
+                top = TouchTarget.minSize + Spacing.md,
+            ),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -390,7 +482,6 @@ private fun StageOverlay(state: CaptureUiState, modifier: Modifier = Modifier) {
 private fun StageControls(
     state: CaptureUiState,
     viewModel: CaptureViewModel,
-    onBack: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         OutlinedButton(
@@ -429,12 +520,7 @@ private fun StageControls(
 
             else -> Unit
         }
-        OutlinedButton(
-            onClick = onBack,
-            modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-        ) {
-            Text("나가기", style = MaterialTheme.typography.labelMedium)
-        }
+
     }
 }
 
