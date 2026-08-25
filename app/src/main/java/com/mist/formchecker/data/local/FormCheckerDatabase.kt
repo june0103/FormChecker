@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RepRecordEntity::class,
         PerformanceMetricsEntity::class,
     ],
-    version = 3,
+    version = 4,
 )
 @TypeConverters(Converters::class)
 abstract class FormCheckerDatabase : RoomDatabase() {
@@ -59,6 +59,23 @@ abstract class FormCheckerDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE rep_records ADD COLUMN warning_phases TEXT")
+            }
+        }
+
+        /**
+         * **어느 기준으로 판정했는지**를 남긴다.
+         *
+         * 이 컬럼들이 없는 동안 쌓인 기록은 기준 완화가 켜졌는지 꺼졌는지 알 수 없어,
+         * 나중에 임계값을 다시 계산할 때 섞인 데이터가 된다. 기존 행은 전부 null —
+         * **false로 채우지 않는다.** 모르는 것을 "꺼짐"으로 세면 그만큼 통계가 틀어지고,
+         * 그 사실이 데이터에서 사라진다.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE rep_records ADD COLUMN relaxed_form INTEGER")
+                db.execSQL("ALTER TABLE rep_records ADD COLUMN knee_tolerance REAL")
+                db.execSQL("ALTER TABLE rep_records ADD COLUMN shallow_tolerance REAL")
+                db.execSQL("ALTER TABLE workout_sessions ADD COLUMN form_thresholds TEXT")
             }
         }
     }
