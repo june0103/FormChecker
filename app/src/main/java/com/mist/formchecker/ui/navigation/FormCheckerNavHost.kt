@@ -12,7 +12,7 @@ import com.mist.formchecker.ui.screen.HistoryScreen
 import com.mist.formchecker.ui.screen.HomeScreen
 import com.mist.formchecker.ui.screen.SessionSummaryScreen
 import com.mist.formchecker.ui.screen.SettingsScreen
-import com.mist.formchecker.ui.screen.SplashScreen
+import com.mist.formchecker.ui.splash.FormCheckerSplash
 import com.mist.formchecker.ui.screen.workout.ExerciseScreen
 import com.mist.formchecker.ui.screen.workout.WorkoutScreen
 
@@ -27,8 +27,8 @@ fun FormCheckerNavHost(
         modifier = modifier,
     ) {
         composable<Splash> {
-            SplashScreen(
-                onReady = {
+            FormCheckerSplash(
+                onFinished = {
                     // 스플래시는 백스택에서 제거한다 — Home에서 뒤로 가기를 눌렀을 때
                     // 스플래시로 돌아가지 않고 앱이 종료되어야 한다.
                     navController.navigate(Home) {

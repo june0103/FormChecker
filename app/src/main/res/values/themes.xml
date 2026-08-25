@@ -1,5 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.FormChecker" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+      앱 본체 테마.
+
+      ## 왜 다크인가
+      플랫폼 테마가 `Material.Light`였다. Compose는 항상 다크 컬러스킴을 쓰는데(Theme.kt)
+      **윈도우 배경만 흰색**이라, 시스템 스플래시가 사라지고 첫 프레임이 그려지기 전에 흰
+      화면이 한 번 스쳤다. windowBackground를 브랜드 배경으로 못 박아 그 깜빡임을 없앤다.
+    -->
+    <style name="Theme.FormChecker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/formchecker_bg_base</item>
+    </style>
+
+    <!--
+      런처가 띄우는 **시스템 스플래시**. 배경색만 남기고 **아무 심볼도 그리지 않는다.**
+
+      ## 왜 정지 심볼을 뺐나
+      로고가 완성된 라임 체크로 한 번 떴다가, 인앱 모션이 무너진 오렌지 자세에서 다시
+      시작했다 — **됐다가 다시 무너지는** 순서로 읽혔다. 브랜드가 보여주려는 이야기는
+      `감지 → 정렬 → 완성` 한 방향이다.
+
+      창 자체는 없앨 수 없다(액티비티가 첫 프레임을 그리기 전에 시스템이 띄운다).
+      아이콘을 비워두면 런처 아이콘이 자동으로 들어가므로 투명한 그림을 명시한다
+      ([splash_no_icon]). 배경이 인앱 스플래시와 같은 색이라 경계가 보이지 않고,
+      사용자에게는 어두운 화면에서 곧바로 모션이 시작되는 것으로 보인다.
+
+      `postSplashScreenTheme`가 스플래시 종료 시점에 위 테마로 갈아탄다.
+    -->
+    <style name="Theme.FormChecker.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/formchecker_bg_base</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_no_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.FormChecker</item>
+    </style>
 </resources>
