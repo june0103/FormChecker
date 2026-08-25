@@ -46,6 +46,8 @@ import com.mist.formchecker.poseengine.Side
 import com.mist.formchecker.poseengine.RepEvent
 import com.mist.formchecker.poseengine.RepState
 import com.mist.formchecker.poseengine.SquatForm
+import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.component.drawBackGlyph
 import com.mist.formchecker.ui.screen.FeedbackLabels
 import com.mist.formchecker.ui.screen.PlaceholderAction
 import com.mist.formchecker.ui.screen.PlaceholderScreen
@@ -177,6 +179,7 @@ private fun WorkoutContent(
                     state = state,
                     onReset = viewModel::resetRepCount,
                     onSwitchAngle = viewModel::selectCameraAngle,
+                    onBack = onBack,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -217,7 +220,7 @@ private fun WorkoutContent(
                 onCancel = viewModel::cancelCalibration,
             )
 
-            // 카메라 전환·뒤로·종료를 한 줄에 모아 세로 공간을 아낀다.
+            // 카메라 전환·종료를 한 줄에 모아 세로 공간을 아낀다. 뒤로는 HUD 좌상단이다.
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 OutlinedButton(
                     onClick = viewModel::toggleCamera,
@@ -228,13 +231,6 @@ private fun WorkoutContent(
                         if (state.isFrontCamera) "후면" else "전면",
                         style = MaterialTheme.typography.labelMedium,
                     )
-                }
-                OutlinedButton(
-                    onClick = onBack,
-                    modifier = Modifier.weight(1f).height(TouchTarget.minSize),
-                    contentPadding = CompactButtonPadding,
-                ) {
-                    Text("뒤로", style = MaterialTheme.typography.labelMedium)
                 }
                 Button(
                     // 저장이 끝난 뒤 이동한다 — 결과 화면이 세션을 읽으므로, 먼저 이동하면
@@ -272,10 +268,11 @@ private fun WorkoutHud(
     state: WorkoutUiState,
     onReset: () -> Unit,
     onSwitchAngle: (CameraAngle) -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
-        HudTopBand(state = state, onReset = onReset)
+        HudTopBand(state = state, onReset = onReset, onBack = onBack)
         // 가운데를 비워 스켈레톤을 가리지 않는다.
         Spacer(Modifier.weight(1f))
         HudBottomBand(state = state, onSwitchAngle = onSwitchAngle)
@@ -287,15 +284,29 @@ private fun WorkoutHud(
 private fun HudTopBand(
     state: WorkoutUiState,
     onReset: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Scrim.copy(alpha = 0.75f), Color.Transparent)))
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            // 사용자 화면 HUD와 같은 여백이다. 여기 값을 바꾸면 두 운동 화면의 아이콘
+            // 자리가 갈린다 — 밴드 가로 패딩(sm) + IconAction 안쪽 패딩(sm) = 16dp가
+            // ScreenHeader를 쓰는 다른 화면과 맞춘 지점이다.
+            .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // 오버레이라 이 줄이 카메라를 줄이지 않는다.
+        Row(modifier = Modifier.fillMaxWidth()) {
+            IconAction(
+                label = "뒤로",
+                onClick = onBack,
+                showLabel = false,
+                glyph = { drawBackGlyph(it) },
+            )
+        }
+
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = state.repCount.toString(),

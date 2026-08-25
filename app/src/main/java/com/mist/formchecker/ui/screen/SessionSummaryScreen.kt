@@ -33,6 +33,7 @@ import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
 import com.mist.formchecker.poseengine.SessionCalories
+import com.mist.formchecker.ui.component.ScreenHeader
 import kotlin.math.roundToInt
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -59,6 +60,7 @@ import com.mist.formchecker.ui.theme.TouchTarget
 fun SessionSummaryScreen(
     sessionId: String,
     onDone: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
     showDiagnostics: Boolean = false,
     viewModel: SessionSummaryViewModel = hiltViewModel(),
@@ -66,14 +68,21 @@ fun SessionSummaryScreen(
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BgBase)
-            .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Text("운동 결과", style = MaterialTheme.typography.headlineSmall)
+    Column(modifier = modifier.fillMaxSize().background(BgBase)) {
+        // ## 나가는 길이 둘이다 — 뜻이 다르다
+        // `홈으로`는 **이 세션을 끝낸다**는 완료 동작이고, 머리줄의 꺾쇠는 **온 곳으로
+        // 돌아간다**. 기록에서 열었을 때 홈으로만 있으면 목록으로 못 돌아가고 처음부터
+        // 다시 찾아 들어가야 했다. 운동에서 넘어온 경우에는 운동 화면이 백스택에서
+        // 걷혀 있으므로(FormCheckerNavHost) 둘 다 홈으로 간다 — 카메라로 되돌아가지 않는다.
+        ScreenHeader(onBack = onBack, title = "운동 결과")
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = Spacing.md)
+                .padding(bottom = Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
 
         // 화면 전체가 하나의 스크롤이다.
         //
@@ -135,6 +144,7 @@ fun SessionSummaryScreen(
             modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
         ) {
             Text("홈으로")
+        }
         }
     }
 }

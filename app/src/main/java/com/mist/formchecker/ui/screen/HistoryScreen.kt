@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.data.local.SessionListItem
+import com.mist.formchecker.ui.component.ScreenHeader
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackDanger
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -60,22 +61,22 @@ fun HistoryScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BgBase)
-            .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("기록", style = MaterialTheme.typography.headlineSmall)
-            if (state.pendingCount > 0) PendingBadge(state.pendingCount)
-        }
+    Column(modifier = modifier.fillMaxSize().background(BgBase)) {
+        // 업로드 대기 배지도 이 줄에 얹는다 — 제목 옆이 원래 자리였고, 따로 한 줄을
+        // 쓰면 목록이 그만큼 밀린다.
+        ScreenHeader(
+            onBack = onBack,
+            title = "기록",
+            trailing = { if (state.pendingCount > 0) PendingBadge(state.pendingCount) },
+        )
 
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = Spacing.md)
+                .padding(bottom = Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
         if (state.sessions.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Text(
@@ -99,11 +100,6 @@ fun HistoryScreen(
             }
         }
 
-        OutlinedButton(
-            onClick = onBack,
-            modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
-        ) {
-            Text("뒤로")
         }
     }
 }

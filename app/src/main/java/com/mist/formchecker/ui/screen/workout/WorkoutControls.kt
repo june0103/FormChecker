@@ -69,6 +69,7 @@ import com.mist.formchecker.ui.theme.FeedbackInfoContainer
 import com.mist.formchecker.ui.theme.FeedbackWarning
 import com.mist.formchecker.ui.theme.FeedbackWarningContainer
 import com.mist.formchecker.ui.theme.LimeGreen
+import com.mist.formchecker.ui.component.glyphStrokeWidth
 import com.mist.formchecker.ui.theme.Radius
 import com.mist.formchecker.ui.theme.RepCounterDisplay
 import com.mist.formchecker.ui.theme.RepCounterDisplayCompact
@@ -531,90 +532,12 @@ private const val WHY_CALIBRATE =
         "세기로 했어요. 키와 다리 길이를 알면 앉은 깊이도 더 정확해져요. 3초면 됩니다."
 
 /**
- * 카메라 위에 얹는 아이콘 버튼. 아이콘 아래 짧은 이름이 붙는다.
- *
- * ## 왜 아이콘을 직접 그리는가
- * `material-icons-core`에도 카메라 전환 아이콘이 없고, 있는 쪽(`material-icons-extended`)은
- * 아이콘 전체를 끌고 온다. 필요한 것이 두 개뿐이라 [Canvas]로 그린다 — 폰트를 로컬에
- * 번들한 것과 같은 이유다(오프라인 우선, 의존성 최소).
- *
- * 직접 그리니 **선 두께를 우리가 정한다.** 카메라 영상 위에 얹히므로 배경 밝기를 통제할 수
- * 없고, 얇은 선은 밝은 배경에서 사라진다.
- *
- * ## 왜 이름을 붙이는가
- * 원형 화살표는 "전환"으로도 "초기화"로도 읽힌다 — 이 화면에는 실제로 "초기화"(횟수 리셋)가
- * 따로 있어서 헷갈릴 여지가 있다. 일반 카메라 앱은 아이콘만 두지만, 여기서는 두 글자를
- * 붙여 그 모호함을 없앤다.
- *
- * @param label 아이콘 아래에 붙는 이름. 접근성 설명으로도 쓴다.
- */
-@Composable
-internal fun HudAction(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    glyph: DrawScope.(Color) -> Unit,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(Radius.md))
-            // 접근성 최소 터치 타겟 (디자인시스템 68행). `clickable`보다 먼저 둬야
-            // 늘어난 높이가 과녁에 포함된다.
-            .heightIn(min = TouchTarget.minSize)
-            .clickable(onClickLabel = label, onClick = onClick)
-            // 아이콘이 그림이라 이름을 따로 붙인다 — 아래 라벨 텍스트는 시각 정보이고,
-            // 스크린 리더에는 이 값이 나간다.
-            //
-            // 접근성 트리에서는 클릭 노드와 이름 노드가 따로 잡힌다(기기에서 확인).
-            // 이 앱의 다른 버튼도 모두 같은 모양이라 Compose가 병합 노드를 그렇게
-            // 내보내는 것으로 보고 그대로 뒀다.
-            .semantics(mergeDescendants = true) { contentDescription = label }
-            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Canvas(modifier = Modifier.size(HudIconSize)) { glyph(TextPrimary) }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = TextPrimary,
-        )
-    }
-}
-
-/** HUD 아이콘 한 변. 터치 타겟(48dp)보다 작다 — 여백이 과녁을 채운다. */
-private val HudIconSize = 26.dp
-
-/** 선 두께 비율. 카메라 영상 위에서 사라지지 않을 만큼 굵게 둔다. */
-private const val GLYPH_STROKE = 0.12f
-
-/** 왼쪽을 가리키는 꺾쇠. 뒤로가기. */
-internal fun DrawScope.drawBackGlyph(color: Color) {
-    val w = size.width
-    val h = size.height
-    val path = Path().apply {
-        moveTo(w * 0.62f, h * 0.16f)
-        lineTo(w * 0.34f, h * 0.50f)
-        lineTo(w * 0.62f, h * 0.84f)
-    }
-    drawPath(
-        path = path,
-        color = color,
-        style = Stroke(
-            width = w * GLYPH_STROKE,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        ),
-    )
-}
-
-/**
  * 한 바퀴 돌아오는 화살표 + 가운데 렌즈. 카메라 전환.
  *
  * 호를 한 바퀴 다 그리지 않고 틈을 남긴다 — 닫힌 원은 회전으로 읽히지 않는다.
  */
 internal fun DrawScope.drawCameraFlipGlyph(color: Color) {
-    val stroke = size.width * GLYPH_STROKE
+    val stroke = glyphStrokeWidth
     // 화살촉이 잘리지 않도록 호를 안쪽으로 들여 그린다.
     val inset = stroke / 2f + size.width * 0.14f
     val diameter = size.width - inset * 2f
