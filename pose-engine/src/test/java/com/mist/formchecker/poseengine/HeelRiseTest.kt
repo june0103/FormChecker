@@ -177,15 +177,31 @@ class HeelRiseTest {
     @Test
     fun `허용폭을 넘으면 경고한다`() {
         val calibration = calibrationOf(sidePose())
-        // 0.20 정강이에 0.03 들림 → 0.15 > 0.11
-        val form = analyze(sidePose(heelLift = 0.03f), calibration)
+        // 0.20 정강이에 0.04 들림 → 0.20 > 0.18
+        val form = analyze(sidePose(heelLift = 0.04f), calibration)
         assertTrue(FormWarning.HEEL_RISE in form.warnings)
+    }
+
+    /**
+     * **실기기에서 관찰된 정상 상한이 여기 들어 있다.** 뒤꿈치가 바닥에 붙어 있는데도
+     * 0.15까지 올라갔다(2026-08-24) — 그 값이 경고를 내면 안 된다. 임계값을 0.11에서
+     * 0.18로 올린 이유가 이것이고, 되돌리려면 이 테스트가 함께 깨져야 한다.
+     */
+    @Test
+    fun `발이 붙어 있을 때 관찰된 상한은 경고하지 않는다`() {
+        val calibration = calibrationOf(sidePose())
+        // 0.20 정강이에 0.03 들림 → 0.15. 예전 임계값(0.11)에서는 오탐이었다.
+        val form = analyze(sidePose(heelLift = 0.03f), calibration)
+        assertFalse(
+            "발이 붙어 있는데 0.15에서 경고하면 안 된다",
+            FormWarning.HEEL_RISE in form.warnings,
+        )
     }
 
     @Test
     fun `허용폭 안이면 경고하지 않는다`() {
         val calibration = calibrationOf(sidePose())
-        // 실측 정상 상한(+0.089)에 해당하는 들림 — 0.20 × 0.089 ≈ 0.0178
+        // 실측 2명의 정상 상한(+0.089)에 해당하는 들림 — 0.20 × 0.089 ≈ 0.0178
         val form = analyze(sidePose(heelLift = 0.0178f), calibration)
         assertFalse(FormWarning.HEEL_RISE in form.warnings)
     }
@@ -224,6 +240,23 @@ class HeelRiseTest {
     }
 
     // ── 깊이 경고와의 관계 ───────────────────────────────────
+    //
+    // 깊이는 **rep 단위 판정으로 옮겼다**(`FormWarning.isRepLevel`) — 하강은 얕은 구간을
+    // 반드시 지나므로 프레임 단위로 말하면 아직 내려가는 중인 사람에게 "덜 앉았다"고 하는
+    // 것이다. 그래서 배제 규칙도 프레임이 아니라 `RepWarnings.of`에서 확인한다.
+
+    /** 분석기는 프레임 경고로 깊이를 내보내지 않는다. **깊이 자체는 그대로 잰다.** */
+    @Test
+    fun `깊이는 프레임 경고로 나가지 않는다`() {
+        val calibration = calibrationOf(sidePose())
+        val form = analyze(sidePose(hipY = 0.60f), calibration)
+
+        assertEquals(DepthLevel.SHALLOW, form.depth)
+        assertFalse(
+            "깊이는 rep 최저점으로만 판정한다",
+            FormWarning.SHALLOW_DEPTH in form.warnings,
+        )
+    }
 
     /**
      * 올바른 스쿼트의 깊이는 "뒤꿈치가 뜨지 않는 범위까지"다. 두 경고가 함께 뜨면
@@ -231,38 +264,45 @@ class HeelRiseTest {
      */
     @Test
     fun `뒤꿈치가 뜨면 깊이 부족을 말하지 않는다`() {
-        val calibration = calibrationOf(sidePose())
-        // 힙을 무릎보다 훨씬 위에 두어 깊이 부족을 만든다.
-        val shallowAndLifted = sidePose(heelLift = 0.03f, hipY = 0.60f)
-        val form = analyze(shallowAndLifted, calibration)
-
-        assertEquals(DepthLevel.SHALLOW, form.depth)
-        assertTrue(FormWarning.HEEL_RISE in form.warnings)
+        val rep = RepWarnings.of(
+            frameWarnings = setOf(FormWarning.HEEL_RISE),
+            depth = DepthLevel.SHALLOW,
+            kneePastToe = null,
+        )
+        assertTrue(FormWarning.HEEL_RISE in rep)
         assertFalse(
             "뒤꿈치가 떴는데 더 깊게 앉으라고 하면 안 된다",
-            FormWarning.SHALLOW_DEPTH in form.warnings,
+            FormWarning.SHALLOW_DEPTH in rep,
         )
     }
 
     @Test
     fun `뒤꿈치가 붙어 있으면 깊이 부족은 그대로 말한다`() {
-        val calibration = calibrationOf(sidePose())
-        val form = analyze(sidePose(hipY = 0.60f), calibration)
-        assertEquals(DepthLevel.SHALLOW, form.depth)
-        assertTrue(FormWarning.SHALLOW_DEPTH in form.warnings)
-        assertFalse(FormWarning.HEEL_RISE in form.warnings)
+        val rep = RepWarnings.of(
+            frameWarnings = emptySet(),
+            depth = DepthLevel.SHALLOW,
+            kneePastToe = null,
+        )
+        assertTrue(FormWarning.SHALLOW_DEPTH in rep)
+        assertFalse(FormWarning.HEEL_RISE in rep)
     }
 
     /**
      * 게이트가 닫힌 세션에서 깊이까지 잃으면 두 항목을 동시에 잃는다. 뒤꿈치를 판정하지
      * 못했을 때는 깊이 경고를 억누르지 않아야 한다.
+     *
+     * 판정하지 못한 rep에는 `HEEL_RISE`가 아예 안 들어오므로 억제도 걸리지 않는다 —
+     * 그 성질을 프레임 경로와 rep 경로 양쪽에서 확인한다.
      */
     @Test
     fun `뒤꿈치를 판정하지 못하면 깊이 경고는 살아 있다`() {
         val calibration = calibrationOf(sidePose(toeX = 0.50f))
         val form = analyze(sidePose(heelLift = 0.05f, toeX = 0.50f, hipY = 0.60f), calibration)
-        assertNull(form.heelRise)
-        assertTrue(FormWarning.SHALLOW_DEPTH in form.warnings)
+        assertNull("게이트가 닫혀 뒤꿈치를 못 잰다", form.heelRise)
+        assertFalse(FormWarning.HEEL_RISE in form.warnings)
+
+        val rep = RepWarnings.of(form.warnings.toSet(), form.depth, kneePastToe = null)
+        assertTrue(FormWarning.SHALLOW_DEPTH in rep)
     }
 
     /**

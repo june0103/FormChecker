@@ -36,10 +36,6 @@ class FeedbackHoldTest {
         assertEquals(1, held.size)
     }
 
-    /**
-     * 기본 hold를 시험하므로 **깊이를 쓰지 않는다** — 깊이는 짧은 hold를 쓴다
-     * ([FeedbackHold.SHORT_HOLD_CHECKS]).
-     */
     @Test
     fun `붙잡는 시간이 지나면 사라진다`() {
         update(FormWarning.HEEL_RISE, at = 0)
@@ -53,7 +49,6 @@ class FeedbackHoldTest {
      */
     @Test
     fun `경고가 계속 나면 갱신되어 사라지지 않는다`() {
-        // 기본 hold를 시험하므로 깊이를 쓰지 않는다.
         update(FormWarning.HEEL_RISE, at = 0)
         update(FormWarning.HEEL_RISE, at = 1_500)
         update(FormWarning.HEEL_RISE, at = 3_000)
@@ -216,63 +211,4 @@ class FeedbackHoldTest {
         assertTrue(update(at = 10).isEmpty())
     }
 
-    // ── 깊이만 짧게 붙잡는다 ────────────────────────────────
-    //
-    // SHALLOW_DEPTH는 하강 중 얕은 구간과 상승 중 얕은 구간에서 각각 발화한다. 2초 hold가
-    // rep 중앙값(1,725ms)보다 길어서 하강에서 한 번 뜨면 상승까지 덮고 거기서 다시 갱신돼
-    // **사실상 연속으로 떠 있었다** — 충분히 깊게 앉는 사람도 계속 봤고, 그 사이 잠깐 나는
-    // 다른 항목이 묻혔다(사용자 신고, 2026-08-24).
-
-    /** **이 묶음의 핵심.** 깊이는 짧은 hold를 쓴다. */
-    @Test
-    fun `깊이는 짧게 사라진다`() {
-        update(FormWarning.SHALLOW_DEPTH, at = 0)
-        assertTrue(update(at = FeedbackHold.SHORT_HOLD_MS - 1).isNotEmpty())
-        assertTrue(update(at = FeedbackHold.SHORT_HOLD_MS).isEmpty())
-    }
-
-    /**
-     * 다른 항목은 그대로다 — [FeedbackHold.DEFAULT_HOLD_MS]의 근거("최저점에서 난 경고를
-     * 다 올라온 뒤에 읽는다")가 그쪽에는 그대로 필요하다.
-     */
-    @Test
-    fun `무릎과 뒤꿈치는 기존 시간을 쓴다`() {
-        listOf(FormWarning.KNEE_VALGUS, FormWarning.HEEL_RISE, FormWarning.EXCESSIVE_LEAN)
-            .forEach { warning ->
-                val fresh = FeedbackHold(holdMs = 2_000L)
-                fresh.update(listOf(warning), null, 0)
-                assertTrue(
-                    "$warning 는 짧은 hold를 쓰면 안 된다",
-                    fresh.update(emptyList(), null, FeedbackHold.SHORT_HOLD_MS).isNotEmpty(),
-                )
-                assertTrue(fresh.update(emptyList(), null, 2_000).isEmpty())
-            }
-    }
-
-    /**
-     * **깊이가 사라진 뒤에도 다른 항목은 남는다.** 이 신고의 목적이 그것이다 — 깊이가
-     * 시간을 통째로 차지하지 않아야 나머지가 보인다.
-     */
-    @Test
-    fun `깊이가 사라져도 다른 항목은 남는다`() {
-        update(FormWarning.SHALLOW_DEPTH, FormWarning.HEEL_RISE, at = 0)
-
-        val held = update(at = FeedbackHold.SHORT_HOLD_MS)
-        assertEquals(listOf(FormWarning.HEEL_RISE), held.map { it.warning })
-    }
-
-    /**
-     * 상한의 근거를 붙든다 — 실측 rep 전체 p5가 1,320ms다. 짧은 hold가 그보다 길면 한
-     * rep의 깊이 표시가 다음 rep으로 넘어간다.
-     */
-    @Test
-    fun `짧은 hold는 가장 빠른 rep보다 짧다`() {
-        assertTrue(
-            "rep p5(1320ms)보다 길면 다음 rep으로 넘어간다",
-            FeedbackHold.SHORT_HOLD_MS < 1_320L,
-        )
-        // 하강 p5(612ms)보다는 길어야 한다 — 하강에서 뜬 경고가 최저점에 닿기 전에
-        // 사라지면 아무도 못 읽는다.
-        assertTrue(FeedbackHold.SHORT_HOLD_MS > 612L)
-    }
 }

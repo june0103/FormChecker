@@ -70,6 +70,85 @@ class DepthBasisTest {
         assertEquals(DepthLevel.DEEP, thresholds.depthLevelByRatio(0.060f))
     }
 
+    // ── 기준 완화: 얕은 쪽만 넓힌다 ──────────────────────────
+    //
+    // 사용자 설정 "기준 완화"가 켜지면 SHALLOW/PARALLEL 경계가 0.03 → 0.10으로 바뀐다.
+    // *"일반인이 운동할 때 적당한 수치"*라는 사용자 판단이다(실측에서 나온 값이 아니다).
+
+    private val relaxed = FormThresholds(
+        shallowToleranceRatio = FormThresholds.RELAXED_SHALLOW_TOLERANCE,
+        shallowShinTolerance = FormThresholds.RELAXED_SHALLOW_SHIN_TOLERANCE,
+    )
+
+    /** 기본값에서 부족이던 −0.10이 완화에서는 적당이 된다. */
+    @Test
+    fun `완화하면 얕은 쪽 경계가 넓어진다`() {
+        assertEquals(DepthLevel.SHALLOW, thresholds.depthLevelByRatio(-0.10f))
+        assertEquals(DepthLevel.PARALLEL, relaxed.depthLevelByRatio(-0.10f))
+    }
+
+    /** 그래도 무한정은 아니다 — 경계를 넘으면 여전히 부족이다. */
+    @Test
+    fun `완화해도 경계를 넘으면 부족이다`() {
+        assertEquals(DepthLevel.SHALLOW, relaxed.depthLevelByRatio(-0.11f))
+        assertEquals(DepthLevel.SHALLOW, relaxed.depthLevelByRatio(-0.25f))
+    }
+
+    /**
+     * **깊은 쪽은 그대로다.** 함께 밀면 완화를 켰을 때 "깊음"이 "적당"으로 내려앉는다 —
+     * 더 깊게 앉는 것은 문제가 아니므로 완화할 이유가 없다.
+     */
+    @Test
+    fun `완화해도 깊음 경계는 그대로다`() {
+        assertEquals(DepthLevel.DEEP, thresholds.depthLevelByRatio(0.060f))
+        assertEquals(DepthLevel.DEEP, relaxed.depthLevelByRatio(0.060f))
+        assertEquals(
+            "측정 오차 폭(0.03) 바로 위는 양쪽 다 깊음이어야 한다",
+            DepthLevel.DEEP,
+            relaxed.depthLevelByRatio(0.031f),
+        )
+    }
+
+    /** 서 있는 경계도 그대로다. */
+    @Test
+    fun `완화해도 선 자세 경계는 그대로다`() {
+        assertEquals(DepthLevel.STANDING, relaxed.depthLevelByRatio(-0.45f))
+    }
+
+    /** 정강이 경로도 같은 폭으로 넓어진다(환산 계수 2.075). */
+    @Test
+    fun `정강이 경로도 함께 넓어진다`() {
+        // 0.10 × 2.075 ≈ 0.208. 기본값(0.062)에서는 부족, 완화에서는 적당.
+        assertEquals(DepthLevel.SHALLOW, thresholds.depthLevelByShinDepth(-0.20f))
+        assertEquals(DepthLevel.PARALLEL, relaxed.depthLevelByShinDepth(-0.20f))
+        assertEquals(DepthLevel.SHALLOW, relaxed.depthLevelByShinDepth(-0.21f))
+    }
+
+    /**
+     * 기본값에서는 새 필드가 [FormThresholds.parallelToleranceRatio]와 같은 값이라
+     * **예전 동작과 완전히 같아야 한다.**
+     */
+    @Test
+    fun `기본값은 예전과 같다`() {
+        assertEquals(thresholds.parallelToleranceRatio, thresholds.shallowToleranceRatio, 1e-6f)
+        assertEquals(thresholds.parallelShinTolerance, thresholds.shallowShinTolerance, 1e-6f)
+    }
+
+    /**
+     * 실측 측면 3명의 최저점 중앙값이 −0.043 / +0.046 / +0.149였다. 완화 경계 −0.10은
+     * **세 사람을 전부 "적당" 안에 넣는다** — 기본값에서는 가장 얕았던 한 명이 걸렸다.
+     */
+    @Test
+    fun `완화하면 실측 세 사람이 전부 통과한다`() {
+        listOf(-0.043f, 0.046f, 0.149f).forEach { median ->
+            assertTrue(
+                "완화에서는 $median 이 부족이면 안 된다",
+                relaxed.depthLevelByRatio(median) != DepthLevel.SHALLOW,
+            )
+        }
+        assertEquals(DepthLevel.SHALLOW, thresholds.depthLevelByRatio(-0.043f))
+    }
+
     /** 경계가 순서대로 놓여 있어야 한다. 뒤집히면 어떤 값도 그 단계로 판정되지 않는다. */
     @Test
     fun `경계가 단조롭게 놓여 있다`() {

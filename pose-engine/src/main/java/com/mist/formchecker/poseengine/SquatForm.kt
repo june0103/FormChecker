@@ -261,4 +261,67 @@ enum class FormWarning(val check: FormCheck) {
      * 체형에 무관하다(사람 간 변동이 사람 내의 1.04배).
      */
     HIP_SHIFT(FormCheck.SYMMETRY),
+    ;
+
+    /**
+     * 이 경고는 **rep이 끝나야 판정할 수 있나.**
+     *
+     * ## 왜 이 구분이 필요한가
+     * [SquatFormAnalyzer]는 프레임 하나만 본다. 여기 `true`인 항목은 **분석기가 절대
+     * 내보내지 않고**, rep을 마감하는 호출부가 넣는다. 두 곳이 같은 항목을 각자 판정하면
+     * 화면과 기록이 갈린다.
+     *
+     * ## 무엇이 rep 단위인가
+     * - [SHALLOW_DEPTH] — 하강은 `STANDING → SHALLOW → PARALLEL`을 지나므로 **얕은 구간이
+     *   반드시 있다.** 프레임 단위로 말하면 아직 내려가는 중인 사람에게 "덜 앉았다"고 하는
+     *   것이다(사용자 신고, 2026-08-24). 최저점 하나로만 판정한다.
+     * - [KNEE_PAST_TOE] — 허용폭이 0이라 프레임 단위로는 정상 rep의 46%가 걸린다.
+     *   rep 중앙값으로 보면 같은 0에서 0%다([FormThresholds.kneeOverToeLimit]).
+     *
+     * 공통점은 **"그 순간 그랬나"가 아니라 "그 rep이 그런 모양이었나"를 묻는다**는 것이다.
+     * 그리고 둘 다 rep 중간에 고칠 수 없어, 다 일어선 뒤에 읽는 것이 맞다.
+     */
+    val isRepLevel: Boolean
+        get() = when (this) {
+            SHALLOW_DEPTH, KNEE_PAST_TOE -> true
+            KNEE_VALGUS, KNEE_FLARED, HEEL_RISE, EXCESSIVE_LEAN, HIP_SHIFT -> false
+        }
+}
+
+/**
+ * rep 하나의 최종 경고 집합을 만든다. **저장과 화면이 같은 답을 쓰게 하는 한 곳이다.**
+ *
+ * [SquatFormAnalyzer]는 프레임 하나만 보므로 [FormWarning.isRepLevel] 항목을 판정할 수 없다.
+ * 그 판정과, 항목 사이의 배제 규칙을 여기서 한 번에 처리한다 — 예전에는 배제가 분석기의
+ * 프레임 경고에만 있고 rep 조립은 최저점 깊이만 보고 무조건 넣어서, **화면에서는 억제된
+ * 조합이 기록에는 함께 남을 수 있었다.**
+ */
+object RepWarnings {
+
+    /**
+     * @param frameWarnings 이 rep 동안 프레임에서 모인 경고. [FormWarning.isRepLevel]
+     *   항목은 들어 있지 않다(분석기가 내보내지 않는다).
+     * @param depth rep 최저점의 깊이 단계. 못 쟀으면 null.
+     * @param kneePastToe rep 중앙값으로 판정한 무릎 위치. 판정할 값이 없었으면 null
+     *   ([FormThresholds.kneePastToeOf]).
+     */
+    fun of(
+        frameWarnings: Set<FormWarning>,
+        depth: DepthLevel?,
+        kneePastToe: Boolean?,
+    ): Set<FormWarning> {
+        // **뒤꿈치가 떴으면 깊이를 말하지 않는다.**
+        //
+        // 올바른 스쿼트의 깊이는 "뒤꿈치가 뜨지 않는 범위까지"다. 둘이 함께 뜨면 "뒤꿈치가
+        // 떴는데 더 깊게 앉으라"는 서로 반대인 지시가 된다.
+        //
+        // 반대로 억누르지 않는 이유: 뒤꿈치는 [FormThresholds.minHeelFootRatio] 게이트
+        // 때문에 판정되지 않는 세션이 있다. 그때 깊이까지 막으면 두 항목을 동시에 잃는다.
+        val heelLifted = FormWarning.HEEL_RISE in frameWarnings
+        val shallow = depth == DepthLevel.SHALLOW && !heelLifted
+
+        return frameWarnings +
+            setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { shallow }) +
+            setOfNotNull(FormWarning.KNEE_PAST_TOE.takeIf { kneePastToe == true })
+    }
 }

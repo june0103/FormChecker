@@ -32,6 +32,7 @@ import com.mist.formchecker.poseengine.MoveNetPoseEngine
 import com.mist.formchecker.poseengine.Pose
 import com.mist.formchecker.poseengine.PoseEngineHandle
 import com.mist.formchecker.poseengine.RepEvent
+import com.mist.formchecker.poseengine.RepWarnings
 import com.mist.formchecker.poseengine.RepFrame
 import com.mist.formchecker.poseengine.RepPhase
 import com.mist.formchecker.poseengine.RepState
@@ -419,6 +420,42 @@ class WorkoutViewModel @Inject constructor(
      * 공유하는 한 경로다 — 둘이 각자 갈아끼우면 한쪽이 화면 상태만 바꾸고 판정은 그대로인
      * 상태가 생긴다.
      */
+    /**
+     * "기준 완화" 설정을 판정에 반영한다. **두 항목을 함께 바꾼다.**
+     *
+     * - 무릎–발끝 허용폭 `0.10 ↔ 0.15`
+     * - 깊이의 얕은 쪽 경계 `0.03 ↔ 0.10` (정강이 경로는 그 환산값)
+     *
+     * **깊이는 얕은 쪽만 넓힌다.** `deepDepthRatio`는 그대로다 — 더 깊게 앉는 것은 문제가
+     * 아니므로 완화할 이유가 없고, 함께 밀면 완화를 켰을 때 "깊음"이 "적당"으로 내려앉는다.
+     *
+     * 개발 화면의 허용폭 버튼([selectKneeToeTolerance])과 충돌하지 않는다 — 이 flow는 설정이
+     * 실제로 바뀔 때만 흘러오므로, 버튼으로 골라 둔 값이 되돌아가지 않는다.
+     */
+    private fun applyRelaxedForm(relaxed: Boolean) {
+        val form = config.form
+        val next = form.copy(
+            kneeToeToleranceRatio = KneeTolerance.forSetting(relaxed),
+            shallowToleranceRatio = if (relaxed) {
+                FormThresholds.RELAXED_SHALLOW_TOLERANCE
+            } else {
+                form.parallelToleranceRatio
+            },
+            shallowShinTolerance = if (relaxed) {
+                FormThresholds.RELAXED_SHALLOW_SHIN_TOLERANCE
+            } else {
+                form.parallelShinTolerance
+            },
+        )
+        if (next == form) return
+        config = config.copy(form = next)
+        formAnalyzer = SquatFormAnalyzer(config)
+        feedbackHold.reset()
+        _uiState.update {
+            it.copy(kneeToeTolerance = next.kneeToeToleranceRatio, heldWarnings = emptyList())
+        }
+    }
+
     private fun applyKneeToeTolerance(value: Float) {
         if (value == _uiState.value.kneeToeTolerance) return
         config = config.copy(form = config.form.copy(kneeToeToleranceRatio = value))
@@ -611,9 +648,7 @@ class WorkoutViewModel @Inject constructor(
         // 다시 흘러오므로(DataStore가 값 변경 시 emit), 버튼으로 다른 값을 골라 둔 상태가
         // 설정 emit 때문에 되돌아가지 않는다. 설정을 바꾸면 그때는 설정이 이긴다.
         viewModelScope.launch {
-            settings.relaxedForm.collect { relaxed ->
-                applyKneeToeTolerance(KneeTolerance.forSetting(relaxed))
-            }
+            settings.relaxedForm.collect(::applyRelaxedForm)
         }
     }
 
@@ -849,13 +884,22 @@ class WorkoutViewModel @Inject constructor(
         if (event is RepEvent.Completed) {
             // rep 중앙값으로 판정한다. 여기서 한 번 계산해 저장과 화면이 같은 값을 쓴다.
             val repKneePastToe = config.form.kneePastToeOf(repKneeOverToe.toList())
-            recordCompletedRep(event.summary, repDepth, repDepthBasis, repKneePastToe)
-            if (repKneePastToe == true) {
-                // **rep 단위 판정이라 프레임 경고에 없다.** 화면에는 rep이 끝난 시점에
-                // 올린다 — 무릎 위치는 앉는 방식의 결과라 rep 중간에 고칠 수 없고, 다음
-                // rep을 시작할 때 쓸 지시다. 붙잡는 시간이 지나면 알아서 내려간다.
+            val repLevel =
+                recordCompletedRep(event.summary, repDepth, repDepthBasis, repKneePastToe)
+            // **rep 단위 판정은 프레임 경고에 없다.** 화면에는 rep이 끝난 시점 —
+            // 즉 **다 일어선 뒤**에 올린다. 그 시점이 `FeedbackHold`의 기본 2초가 겨냥한
+            // 자리다("최저점에서 난 경고를 다 올라온 뒤에 읽을 수 있어야 한다").
+            //
+            // 깊이는 "방금 rep이 얕았다"이고 무릎 위치는 앉는 방식의 결과라, 둘 다 rep
+            // 중간에 고칠 수 없고 **다음 rep에 쓸 지시**다.
+            //
+            // 저장이 쓴 것과 **같은 집합**에서 고른다. 조건을 여기서 다시 계산하면 화면과
+            // 기록이 갈린다. 프레임 경고는 이미 붙잡혀 있으므로 다시 넣지 않는다 —
+            // 넣으면 그 항목의 만료 시각만 밀린다.
+            val repOnly = repLevel.filter { it.isRepLevel }.sortedBy { it.ordinal }
+            if (repOnly.isNotEmpty()) {
                 heldWarnings = feedbackHold.update(
-                    warnings = listOf(FormWarning.KNEE_PAST_TOE),
+                    warnings = repOnly,
                     side = null,
                     nowMs = result.timestampMs,
                 )
@@ -901,18 +945,15 @@ class WorkoutViewModel @Inject constructor(
         depth: DepthLevel?,
         basis: DepthBasis?,
         kneePastToe: Boolean?,
-    ) {
-        val warnings = repWarnings.toSet()
-        // 깊이 경고는 프레임이 아니라 rep 최저점으로 판정한다. 프레임 단위 경고를 그대로
-        // 쓰면 하강 중 잠깐 SHALLOW였던 것이 남는데, 그건 지나가는 중이었을 뿐이다.
-        //
-        // 무릎이 발끝을 넘었는가도 **rep 단위**다. 허용폭이 0이라 프레임 단위로는 정상
-        // rep의 46%가 걸린다 — 중앙값으로 보면 같은 0에서 0%다
-        // (`FormThresholds.kneeOverToeLimit` 주석의 표). 그래서 이 두 항목만 프레임 경고에
-        // 담기지 않고 여기서 결정된다.
-        val repLevelWarnings = warnings.minus(FormWarning.SHALLOW_DEPTH) +
-            setOfNotNull(FormWarning.SHALLOW_DEPTH.takeIf { depth == DepthLevel.SHALLOW }) +
-            setOfNotNull(FormWarning.KNEE_PAST_TOE.takeIf { kneePastToe == true })
+    ): Set<FormWarning> {
+        // 깊이와 무릎 위치는 **rep 단위 판정이다**(`FormWarning.isRepLevel`). 분석기가
+        // 프레임 경고로 내보내지 않으므로 여기서 결정된다. 판정과 항목 사이 배제 규칙은
+        // `RepWarnings.of` 한 곳에 있다 — 저장과 화면이 같은 답을 써야 한다.
+        val repLevelWarnings = RepWarnings.of(
+            frameWarnings = repWarnings.toSet(),
+            depth = depth,
+            kneePastToe = kneePastToe,
+        )
 
         // **소리는 rep이 끝날 때만 낸다.**
         //
@@ -953,6 +994,7 @@ class WorkoutViewModel @Inject constructor(
             kneeToeSide = repWorstKnee?.first?.name,
             warningPhases = repWarningPhases.mapValues { it.value.toSet() },
         )
+        return repLevelWarnings
     }
 
     /**

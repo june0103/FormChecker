@@ -55,24 +55,11 @@ data class HeldWarning(
  * 시간을 밖에서 받는다([update]의 `nowMs`) — 프레임 타임스탬프를 그대로 쓰면 테스트가
  * 실제 시간을 기다리지 않아도 되고, 프레임이 끊긴 구간에서도 계산이 맞는다.
  */
-class FeedbackHold(
-    private val holdMs: Long = DEFAULT_HOLD_MS,
-    private val shortHoldMs: Long = SHORT_HOLD_MS,
-) {
+class FeedbackHold(private val holdMs: Long = DEFAULT_HOLD_MS) {
 
     private class Entry(val warning: FormWarning, val side: Side?, val firstShownAtMs: Long) {
         var lastSeenAtMs: Long = firstShownAtMs
     }
-
-    /**
-     * 이 항목을 얼마나 붙잡을까.
-     *
-     * 항목마다 다른 이유는 **읽어야 하는 시점이 다르기 때문**이다. [DEFAULT_HOLD_MS]는
-     * "최저점에서 난 경고를 다 올라온 뒤에 읽을 수 있어야 한다"에서 나온 값인데,
-     * [SHORT_HOLD_CHECKS]에 있는 항목은 그 조건이 필요 없다.
-     */
-    private fun holdMsFor(check: FormCheck): Long =
-        if (check in SHORT_HOLD_CHECKS) shortHoldMs else holdMs
 
     /** 항목별로 하나씩. 키가 [FormCheck]인 것이 "항목당 하나" 규칙 그 자체다. */
     private val held = mutableMapOf<FormCheck, Entry>()
@@ -107,9 +94,7 @@ class FeedbackHold(
             held[warning.check] = Entry(warning, side.takeIf { warning.hasSide }, nowMs)
         }
 
-        held.entries.removeAll { (check, entry) ->
-            nowMs - entry.lastSeenAtMs >= holdMsFor(check)
-        }
+        held.entries.removeAll { (_, entry) -> nowMs - entry.lastSeenAtMs >= holdMs }
 
         return held.values
             .map { HeldWarning(it.warning, it.side, it.firstShownAtMs) }
@@ -167,46 +152,19 @@ class FeedbackHold(
          * **rep 중앙값(1,725ms)보다 길다** — 즉 다음 rep으로 넘어갈 수 있다. 그 대가를
          * 받아들인 이유는 [FeedbackHold] 주석에 적었다.
          *
+         * ## 항목마다 다르게 두지 않는다
+         * 한때 깊이만 0.9초로 줄인 적이 있다 — `SHALLOW_DEPTH`가 하강·상승의 얕은 구간에서
+         * 각각 발화해 화면을 통째로 차지했기 때문이다. **그건 표시 시간 문제가 아니라 판정
+         * 시점 문제였고**, 깊이를 rep 단위로 옮기면서 사라졌다([FormWarning.isRepLevel]).
+         * 지금 붙잡는 항목은 전부 "최저점 근방에서 나거나 rep이 끝날 때 뜨는" 것이라 같은
+         * 근거를 공유한다. 소비자 없는 분기를 남겨두지 않는다.
+         *
          * ## 아직 사람으로 확인하지 않았다
          * "떨어져 선 자리에서 2초면 읽히는가"는 기기 앞 스크린샷으로 답할 수 없다. 다음
          * 촬영에서 서서 확인하고 조정할 값이다.
          */
         const val DEFAULT_HOLD_MS = 2_000L
 
-        /**
-         * 짧게만 붙잡는 항목.
-         *
-         * ## 깊이가 화면을 계속 차지하고 있었다
-         * `SHALLOW_DEPTH`는 **하강 중 얕은 구간과 상승 중 얕은 구간에서 각각 발화한다** —
-         * 서 있다가 내려가면 `STANDING → SHALLOW → PARALLEL`이고 올라올 때 역순이다.
-         * [DEFAULT_HOLD_MS](2초)가 rep 중앙값(1,725ms)보다 길어서, 하강에서 한 번 뜨면
-         * 최저점과 상승을 덮고 상승에서 다시 갱신된다 — **사실상 연속으로 떠 있었다.**
-         *
-         * 그래서 충분히 깊게 앉는 사람도 "더 깊게 앉으세요"를 계속 보고, 그 사이에 잠깐
-         * 나는 다른 항목이 묻혔다(사용자 신고, 2026-08-24). 화면은 붙잡힌 항목을 **전부**
-         * 그리므로 막힌 것은 아니었지만, 시간을 통째로 차지하면 결과가 같다.
-         *
-         * ## 왜 깊이만인가
-         * [DEFAULT_HOLD_MS]의 근거는 "**최저점에서** 난 경고를 다 올라온 뒤에 읽을 수
-         * 있어야 한다"였다. 무릎·뒤꿈치·상체는 최저점 근방에서 나므로 그 조건이 필요하다.
-         *
-         * 깊이는 다르다 — **지금 이 순간 더 내려가면 되는 지시**라서 다 올라온 뒤까지
-         * 남아 있을 이유가 없고, 놓쳐도 리포트가 말한다. 그리고 rep 판정은 애초에 최저점
-         * 하나로만 하므로([SquatFormAnalyzer] 호출부) 화면 표시가 짧아져도 기록은 안 바뀐다.
-         */
-        val SHORT_HOLD_CHECKS = setOf(FormCheck.DEPTH)
-
-        /**
-         * [SHORT_HOLD_CHECKS]를 붙잡는 시간(ms). ([ThresholdOrigin.PROVISIONAL])
-         *
-         * **상한만 근거가 있다** — 실측 rep 전체 p5가 1,320ms이므로 그보다 짧아야 한 rep의
-         * 표시가 다음 rep으로 넘어가지 않는다. 900ms는 그 아래이면서 하강 p5(612ms)보다
-         * 길어, 하강에서 뜬 경고가 최저점에 닿기 전에 사라지지는 않는다.
-         *
-         * **하한은 모른다.** "떨어져 선 자리에서 0.9초면 읽히는가"는 기기 앞 스크린샷으로
-         * 답할 수 없다([DEFAULT_HOLD_MS]와 같은 한계다). 다음 촬영에서 서서 확인할 값이다.
-         */
-        const val SHORT_HOLD_MS = 900L
     }
 }
 

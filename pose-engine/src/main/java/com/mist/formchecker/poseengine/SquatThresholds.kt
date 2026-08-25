@@ -115,6 +115,19 @@ data class FormThresholds(
      */
     val deepDepthRatio: Float = parallelToleranceRatio,
 
+    /**
+     * `SHALLOW`와 `PARALLEL`을 가르는 경계의 폭. **기본값은 [parallelToleranceRatio]와 같다.**
+     *
+     * ## 왜 별도 필드인가 — 완화는 한쪽만 하는 것이다
+     * [parallelToleranceRatio]는 "대퇴 수평 ± 측정 오차"의 폭이라 **양쪽 대칭**이고, 그래서
+     * [deepDepthRatio]가 그 값을 그대로 쓴다. 그런데 "기준 완화"가 넓히려는 것은
+     * **얕은 쪽뿐**이다 — 더 깊게 앉는 것은 어차피 문제가 아니므로 `DEEP` 경계까지 밀 이유가
+     * 없다. 한 필드로 두 경계를 움직이면 완화를 켰을 때 "깊음"이 "적당"으로 바뀐다.
+     *
+     * 기본값에서는 셋이 같은 값이라 예전 동작과 완전히 같다.
+     */
+    val shallowToleranceRatio: Float = parallelToleranceRatio,
+
     // ── 깊이: 정강이 길이 기준 (기준선이 없을 때) ───────────
     //
     // `shinDepthRatio = (hip.y − knee.y) / (ankle.y − knee.y)`. 분자는 [standingDepthRatio]
@@ -146,6 +159,14 @@ data class FormThresholds(
      * 환산이 필요한 것은 **폭**뿐이고, 그 계수가 사람마다 4%밖에 안 흔들린다.
      */
     val parallelShinTolerance: Float = 0.062f,
+
+    /**
+     * 정강이 기준 `SHALLOW`/`PARALLEL` 경계의 폭. [shallowToleranceRatio]의 환산값이다.
+     *
+     * 환산 계수는 `legLength / tibiaLength`로 실측 3명이 2.075 / 2.018 / 2.100이었다
+     * ([standingShinDepth] 참고). 기본값에서는 [parallelShinTolerance]와 같다.
+     */
+    val shallowShinTolerance: Float = parallelShinTolerance,
 
     /**
      * 최저점의 무릎폭/발목폭이 **선 자세 기준선의 이 배수 미만**이면 valgus로 본다.
@@ -218,8 +239,12 @@ data class FormThresholds(
     /**
      * 뒤꿈치가 이 값 이상 들리면 경고한다. `((발끝.y − 뒤꿈치.y) − 기립값) / 정강이`.
      *
-     * ## 실측으로 확정 (측면 2세션 / 2명 / 35 rep)
-     * rep마다 구간 전체의 최댓값을 뽑았다 — 경고는 rep 안에서 한 번이라도 나면 뜬다.
+     * ## 0.11 → 0.18 (2026-08-24, [ThresholdOrigin.PROVISIONAL]로 내림)
+     * **뒤꿈치가 바닥에 붙어 있는데 0.15까지 올라갔다.** 실기기(SM-S928N)에서 사용자가
+     * 직접 확인했고, 게이트는 내내 열려 있었다(발/정강이 0.56). 서 있을 때는 −0.03~+0.04로
+     * 정상이었으므로 기준선이 틀린 것도 아니다.
+     *
+     * 0.11은 **게이트를 통과한 2명**의 rep 최대(+0.089 / +0.081) 위에 잡은 값이었다:
      *
      * | 사람 | 발/정강이 | rep | p50 | p95 | 최대 | MAD |
      * |---|---|---|---|---|---|---|
@@ -227,26 +252,35 @@ data class FormThresholds(
      * | P008 | 0.561 | 15 | +0.064 | +0.077 | +0.081 | 0.0058 |
      * | ~~P007~~ | ~~0.413~~ | ~~9~~ | ~~+0.052~~ | ~~+0.114~~ | ~~+0.144~~ | ~~0.0115~~ |
      *
-     * P007은 [minHeelFootRatio] 게이트에서 제외된다 — 발이 짧게 보인 세션이고, 정확히 그
-     * 세션만 값이 2배 시끄럽다.
+     * 그 KDoc은 **"표본이 2명이라 세 번째 사람에서 오탐이 날 여지가 크다"고 스스로 적어
+     * 두었고, 정확히 그 일이 일어났다.** 세 번째 사람의 정상 상한이 두 사람의 1.7배다.
      *
-     * 정상 상한이 +0.089이므로 0.11은 **오탐 0%**이고 여유 0.021은 사람 내 MAD 중앙값
-     * (0.0071)의 **약 3.0배**다. 상체 숙임(45°, 여유가 MAD의 3.1배)과 같은 방식으로 잡았다.
+     * ## ⚠ 이 값은 실측 분포에서 나온 것이 아니다
+     * 0.18은 **관찰된 정상 상한(0.15) 위에 여유를 둔 값**이다. 프레임이 기록되지 않았으므로
+     * 분포도 사람 내 MAD도 없다 — 그래서 [ThresholdOrigin.DATA_DERIVED]에서 내렸다.
+     * 앞의 표는 이제 **하한만 말해준다**(정상은 최소 0.15까지 간다).
      *
-     * 정규화 품질: 사람 간 중앙값 폭 0.0138 = 사람 내 MAD의 **1.96배**. 폐기된
-     * [valgusSpreadGain](5.18배)이나 [deepDepthRatio] 논의(8.27배)보다 훨씬 낫고,
-     * 골반 쏠림(1.04배)보다는 못하다.
+     * ## ⚠⚠ 이 판정이 아무것도 못 잡을 수 있다
+     * 진짜 뒤꿈치 들림의 크기에 대한 유일한 추정치는 AI Hub 3D 라벨이다 — 정상 −3.6mm /
+     * 오류 +55.4mm, 정강이 400mm로 환산하면 **약 0.139**. 그 값이 맞다면 **0.18은 실제
+     * 오류보다 위에 있다.**
      *
-     * ## ⚠ 두 가지가 미검증이다
-     * 1. **표본이 2명이다.** 측면 세션이 3개뿐이고 그중 하나가 게이트에서 빠졌다. 세 번째
-     *    사람에서 오탐이 날 여지가 [torsoLeanLimitDegrees](3명)보다 크다.
-     * 2. **오류를 잡는지 모른다.** [CaptureIntent.HEEL_RISE] 세션이 없다. 뒤꿈치를 의도적으로
-     *    든 사람이 0.11을 넘는지 확인되지 않았다. AI Hub 3D 라벨의 뒤꿈치 상승량(정상
-     *    −3.6mm / 오류 +55.4mm)을 정강이 400mm로 환산하면 약 0.139지만, **그 데이터로 만든
-     *    뒤꿈치 모델은 실기 recall 0/20이었다**(`기술선택_기록.md` 29번). 자릿수 확인
-     *    이상으로 믿을 값이 아니다.
+     * 그 추정치 자체가 못 믿을 값이긴 하다(그 데이터로 만든 뒤꿈치 모델이 실기 recall
+     * 0/20이었다 — `기술선택_기록.md` 29번). 하지만 지금 있는 유일한 숫자이고, 그것과
+     * 관찰된 정상 상한(0.15)이 **겹친다**는 사실이 중요하다:
+     *
+     * > 지금 이 측정으로는 "발이 붙어 있는데 값이 큰 것"과 "정말 뒤꿈치가 뜬 것"을 가를 수
+     * > 없을 가능성이 있다. 그렇다면 임계값을 어디에 두든 해결되지 않는다.
+     *
+     * 왜 그런지에 대한 가설: 이 값은 기립에서 잰 `발끝.y − 뒤꿈치.y`를 빼는데, **앉으면
+     * 발목이 굽어 발등 각도가 바뀌므로 그 오프셋이 더는 맞지 않는다.** 신발이면 밑창과
+     * 토박스 때문에 더 커진다(사용자 지적).
+     *
+     * **다음에 할 일**: 맨발·신발 각각 측면 Capture 세션을 찍어 (1) 이 사람의 정상 분포,
+     * (2) 신발의 영향, (3) rep 중앙값으로 보면 내려가는지, (4) 의도적으로 든 뒤꿈치가
+     * 얼마나 되는지를 함께 재고 이 값을 다시 정한다.
      */
-    val heelRiseLimit: Float = 0.11f,
+    val heelRiseLimit: Float = 0.18f,
 
     /**
      * `발 길이 ÷ 정강이 길이`가 이 값 미만이면 **뒤꿈치를 판정하지 않는다.**
@@ -451,7 +485,8 @@ data class FormThresholds(
     fun depthLevelByRatio(depthRatio: Float): DepthLevel = when {
         depthRatio <= standingDepthRatio -> DepthLevel.STANDING
         depthRatio >= deepDepthRatio -> DepthLevel.DEEP
-        depthRatio >= -parallelToleranceRatio -> DepthLevel.PARALLEL
+        // 얕은 쪽 경계만 별도 필드다 — "기준 완화"가 여기만 넓힌다.
+        depthRatio >= -shallowToleranceRatio -> DepthLevel.PARALLEL
         else -> DepthLevel.SHALLOW
     }
 
@@ -486,7 +521,7 @@ data class FormThresholds(
     fun depthLevelByShinDepth(shinDepth: Float): DepthLevel = when {
         shinDepth <= standingShinDepth -> DepthLevel.STANDING
         shinDepth >= parallelShinTolerance -> DepthLevel.DEEP
-        shinDepth >= -parallelShinTolerance -> DepthLevel.PARALLEL
+        shinDepth >= -shallowShinTolerance -> DepthLevel.PARALLEL
         else -> DepthLevel.SHALLOW
     }
 
@@ -603,6 +638,41 @@ data class FormThresholds(
         const val RELAXED_KNEE_TOE_TOLERANCE = 0.15f
 
         /**
+         * "기준 완화"를 켰을 때 쓰는 [shallowToleranceRatio]. **0.10.**
+         *
+         * ## 무슨 뜻인가
+         * `depthRatio`는 `(엉덩이.y − 무릎.y) / 다리 길이`이므로, −0.10은 **엉덩이가 무릎보다
+         * 다리 길이의 10%만큼 위**인 지점이다. 다리 길이 85cm인 사람이면 무릎 높이에서
+         * 약 8.5cm 위까지를 "적당"으로 본다.
+         *
+         * 기본값 0.03은 **측정 오차**의 폭이다(관절 중심 추정 오차 대퇴 3°의 환산).
+         * 0.10은 성격이 다르다 — 오차가 아니라 **"이 정도면 됐다고 볼 것인가"**라는 판단이다.
+         *
+         * ## ⚠ 사용자 판단이다 ([ThresholdOrigin.PROVISIONAL])
+         * *"일반인이 운동할 때 적당한 수치"*라는 사용자 판단으로 정했다(2026-08-24).
+         * **실측에서 나온 값이 아니다** — 이 프로젝트의 다른 깊이 임계값들과 근거의 성격이
+         * 다르므로 섞어 읽지 말 것.
+         *
+         * 참고할 실측은 있다: 측면 44 rep의 최저점이 −0.118~+0.177로 흩어졌고, 사람별
+         * 중앙값이 −0.043 / +0.046 / +0.149였다. **−0.10이면 그 세 사람이 전부 "적당" 안에
+         * 들어온다**(가장 얕았던 사람의 중앙값 −0.043도 여유 있게 통과). 기본값 −0.03에서는
+         * 한 명이 걸렸다.
+         *
+         * ## 얕은 쪽만 넓힌다
+         * [deepDepthRatio]는 그대로 +0.03이다. 더 깊게 앉는 것은 문제가 아니므로 완화할
+         * 이유가 없고, 함께 밀면 완화를 켰을 때 "깊음"이 "적당"으로 내려앉는다.
+         */
+        const val RELAXED_SHALLOW_TOLERANCE = 0.10f
+
+        /**
+         * [RELAXED_SHALLOW_TOLERANCE]의 정강이 기준 환산값. `0.10 × 2.075 ≈ 0.208`.
+         *
+         * 계수는 [standingShinDepth]가 쓴 것과 같다 — 실측 3명의 `다리/정강이`가
+         * 2.075 / 2.018 / 2.100으로 폭 4%였고 중앙값을 썼다.
+         */
+        const val RELAXED_SHALLOW_SHIN_TOLERANCE = 0.208f
+
+        /**
          * 각 값의 출처. 데이터 측 확정값이 오면 여기가 [ThresholdOrigin.DATA_DERIVED]로 바뀐다.
          *
          * 각도 기준 깊이 임계값(`standingAngle`/`shallowAngle`/`deepAngle`)은 설계문서
@@ -619,12 +689,17 @@ data class FormThresholds(
             // 깊이 — 정강이 기준(기준선 없음). 위 두 값의 환산이고 계수는 실측 3명 2.018~2.100.
             "standingShinDepth" to ThresholdOrigin.DATA_DERIVED,
             "parallelShinTolerance" to ThresholdOrigin.DEFINITION,
+            // 기본값은 위 둘과 같은 값(측정 오차)이라 출처도 같다. "기준 완화"가 갈아끼우는
+            // 값(RELAXED_SHALLOW_TOLERANCE)만 사용자 판단이고, 그건 상수 주석에 적었다.
+            "shallowToleranceRatio" to ThresholdOrigin.DEFINITION,
+            "shallowShinTolerance" to ThresholdOrigin.DEFINITION,
             "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             // 측면 3세션 rep 내부 1875프레임. 정상 최대 41.1° 대비 오탐 0%.
             // 사람 간 변동이 사람 내의 0.44배로, 정규화 없이 공통 임계값을 쓸 수 있다.
             "torsoLeanLimitDegrees" to ThresholdOrigin.DATA_DERIVED,
             // 측면 2세션·35 rep 정상 상한(+0.089) + MAD 3배 여유.
-            "heelRiseLimit" to ThresholdOrigin.DATA_DERIVED,
+            // 실측 분포가 아니라 관찰된 정상 상한(0.15) 위에 둔 값이다 — 상수 주석 참고.
+            "heelRiseLimit" to ThresholdOrigin.PROVISIONAL,
             // 두 무리가 갈리는 것은 실측이지만, 나쁜 예가 한 세션뿐이라 경계는 잠정이다.
             "minHeelFootRatio" to ThresholdOrigin.PROVISIONAL,
             // 허용폭이 0이다 — 기준점 자체가 코칭 규칙에서 나온 정의이고, 노이즈는

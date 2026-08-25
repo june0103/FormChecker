@@ -238,6 +238,43 @@ class KneePastToeTest {
     }
 
     /**
+     * **계약을 붙든다: 분석기는 rep 단위 항목을 절대 내보내지 않는다.**
+     *
+     * 두 곳이 같은 항목을 각자 판정하면 화면과 기록이 갈린다. 새 rep 단위 판정을 추가할 때
+     * 프레임 경로에 실수로 남겨두면 여기서 걸린다.
+     */
+    @Test
+    fun `분석기는 rep 단위 항목을 내보내지 않는다`() {
+        val repLevel = FormWarning.entries.filter { it.isRepLevel }
+        assertEquals(
+            "rep 단위 항목이 바뀌면 이 테스트도 함께 봐야 한다",
+            setOf(FormWarning.SHALLOW_DEPTH, FormWarning.KNEE_PAST_TOE),
+            repLevel.toSet(),
+        )
+
+        // 깊이 부족 + 무릎 돌출이 동시에 성립하는 프레임인데도 프레임 경고에는 없다.
+        val warnings = analyze(sidePose(kneeAhead = 0.30f, hipY = 0.60f)).warnings
+        assertTrue(
+            "프레임 경고에 rep 단위 항목이 섞였다: $warnings",
+            warnings.none { it.isRepLevel },
+        )
+    }
+
+    /** 그 항목들은 [RepWarnings.of]가 넣는다. */
+    @Test
+    fun `rep 조립이 두 항목을 넣는다`() {
+        val rep = RepWarnings.of(
+            frameWarnings = emptySet(),
+            depth = DepthLevel.SHALLOW,
+            kneePastToe = true,
+        )
+        assertEquals(
+            setOf(FormWarning.SHALLOW_DEPTH, FormWarning.KNEE_PAST_TOE),
+            rep,
+        )
+    }
+
+    /**
      * **뒤꿈치 들림을 배제하지 않는다.** 깊이-뒤꿈치 관계와 다른 점이다 — 원인도 지시도
      * 같은 방향이라 함께 떠도 모순이 아니다.
      */
