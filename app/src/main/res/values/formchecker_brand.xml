@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  브랜드 색 — XML에서만 쓰는 값이다.
+
+  Compose 쪽 정본은 `ui/theme/Color.kt`(`BgBase` / `LimeGreen`)이고 여기 값과 같아야
+  한다. 두 벌인 이유는 벡터 드로어블·어댑티브 아이콘·윈도우 테마가 Compose 값을 읽지
+  못하기 때문이다. **같은 색을 두 곳에 적는 것이므로 한쪽만 바꾸면 런처 아이콘과 앱
+  화면의 검정이 갈린다** — 바꿀 때는 반드시 Color.kt와 함께 본다.
+
+  제작물(branding/production/android/res/values/formchecker_brand.xml)에는
+  formchecker_text_primary·formchecker_warning도 있었지만 XML 소비자가 없어 넣지
+  않았다. 그 두 색은 Compose(TextPrimary·FeedbackWarning)가 이미 들고 있다.
+-->
+<resources>
+    <!-- 어댑티브 아이콘 배경, 시스템 스플래시 배경, 윈도우 배경. -->
+    <color name="formchecker_bg_base">#0A0A0F</color>
+    <!-- 심볼(관절점 3개 + 체크)의 유일한 색. -->
+    <color name="formchecker_lime">#C6FF00</color>
+</resources>

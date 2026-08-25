@@ -20,6 +20,9 @@ kotlinxCoroutinesTest = "1.11.0"
 workManager = "2.11.2"
 cameraX = "1.6.1"
 navigationCompose = "2.9.8"
+# 시스템 스플래시 호환 계층. API 31 미만에서도 같은 배경·심볼로 그려준다
+# (Maven 메타데이터 직접 확인, 2026-08-25 기준 최신 안정)
+coreSplashscreen = "1.2.0"
 kotlinxSerialization = "1.11.0"
 # 2.1.6+ splits out a `litert-api` artifact that declares the same namespace as
 # `litert` itself, which fails AGP's manifest merger. Pinned to the last release
@@ -46,6 +49,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 # Navigation — 타입 안전 라우트(@Serializable)를 쓰므로 serialization 런타임이 함께 필요
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 
 # Hilt (DI)

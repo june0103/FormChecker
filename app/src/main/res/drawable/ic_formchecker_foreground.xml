@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M32,59 L47,69 L75,40"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/formchecker_lime"
+        android:strokeWidth="9" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M32,52 A7,7 0,1 0,32,66 A7,7 0,1 0,32,52" android:fillColor="@color/formchecker_lime" />
+    <path android:pathData="M47,62.5 A6.5,6.5 0,1 0,47,75.5 A6.5,6.5 0,1 0,47,62.5" android:fillColor="@color/formchecker_lime" />
+    <path android:pathData="M75,33 A7,7 0,1 0,75,47 A7,7 0,1 0,75,33" android:fillColor="@color/formchecker_lime" />
+</vector>
