@@ -420,6 +420,42 @@ class WorkoutViewModel @Inject constructor(
      * 공유하는 한 경로다 — 둘이 각자 갈아끼우면 한쪽이 화면 상태만 바꾸고 판정은 그대로인
      * 상태가 생긴다.
      */
+    /**
+     * "기준 완화" 설정을 판정에 반영한다. **두 항목을 함께 바꾼다.**
+     *
+     * - 무릎–발끝 허용폭 `0.10 ↔ 0.15`
+     * - 깊이의 얕은 쪽 경계 `0.03 ↔ 0.10` (정강이 경로는 그 환산값)
+     *
+     * **깊이는 얕은 쪽만 넓힌다.** `deepDepthRatio`는 그대로다 — 더 깊게 앉는 것은 문제가
+     * 아니므로 완화할 이유가 없고, 함께 밀면 완화를 켰을 때 "깊음"이 "적당"으로 내려앉는다.
+     *
+     * 개발 화면의 허용폭 버튼([selectKneeToeTolerance])과 충돌하지 않는다 — 이 flow는 설정이
+     * 실제로 바뀔 때만 흘러오므로, 버튼으로 골라 둔 값이 되돌아가지 않는다.
+     */
+    private fun applyRelaxedForm(relaxed: Boolean) {
+        val form = config.form
+        val next = form.copy(
+            kneeToeToleranceRatio = KneeTolerance.forSetting(relaxed),
+            shallowToleranceRatio = if (relaxed) {
+                FormThresholds.RELAXED_SHALLOW_TOLERANCE
+            } else {
+                form.parallelToleranceRatio
+            },
+            shallowShinTolerance = if (relaxed) {
+                FormThresholds.RELAXED_SHALLOW_SHIN_TOLERANCE
+            } else {
+                form.parallelShinTolerance
+            },
+        )
+        if (next == form) return
+        config = config.copy(form = next)
+        formAnalyzer = SquatFormAnalyzer(config)
+        feedbackHold.reset()
+        _uiState.update {
+            it.copy(kneeToeTolerance = next.kneeToeToleranceRatio, heldWarnings = emptyList())
+        }
+    }
+
     private fun applyKneeToeTolerance(value: Float) {
         if (value == _uiState.value.kneeToeTolerance) return
         config = config.copy(form = config.form.copy(kneeToeToleranceRatio = value))
@@ -612,9 +648,7 @@ class WorkoutViewModel @Inject constructor(
         // 다시 흘러오므로(DataStore가 값 변경 시 emit), 버튼으로 다른 값을 골라 둔 상태가
         // 설정 emit 때문에 되돌아가지 않는다. 설정을 바꾸면 그때는 설정이 이긴다.
         viewModelScope.launch {
-            settings.relaxedForm.collect { relaxed ->
-                applyKneeToeTolerance(KneeTolerance.forSetting(relaxed))
-            }
+            settings.relaxedForm.collect(::applyRelaxedForm)
         }
     }
 

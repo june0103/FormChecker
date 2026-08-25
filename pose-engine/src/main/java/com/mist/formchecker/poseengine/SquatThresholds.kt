@@ -115,6 +115,19 @@ data class FormThresholds(
      */
     val deepDepthRatio: Float = parallelToleranceRatio,
 
+    /**
+     * `SHALLOW`와 `PARALLEL`을 가르는 경계의 폭. **기본값은 [parallelToleranceRatio]와 같다.**
+     *
+     * ## 왜 별도 필드인가 — 완화는 한쪽만 하는 것이다
+     * [parallelToleranceRatio]는 "대퇴 수평 ± 측정 오차"의 폭이라 **양쪽 대칭**이고, 그래서
+     * [deepDepthRatio]가 그 값을 그대로 쓴다. 그런데 "기준 완화"가 넓히려는 것은
+     * **얕은 쪽뿐**이다 — 더 깊게 앉는 것은 어차피 문제가 아니므로 `DEEP` 경계까지 밀 이유가
+     * 없다. 한 필드로 두 경계를 움직이면 완화를 켰을 때 "깊음"이 "적당"으로 바뀐다.
+     *
+     * 기본값에서는 셋이 같은 값이라 예전 동작과 완전히 같다.
+     */
+    val shallowToleranceRatio: Float = parallelToleranceRatio,
+
     // ── 깊이: 정강이 길이 기준 (기준선이 없을 때) ───────────
     //
     // `shinDepthRatio = (hip.y − knee.y) / (ankle.y − knee.y)`. 분자는 [standingDepthRatio]
@@ -146,6 +159,14 @@ data class FormThresholds(
      * 환산이 필요한 것은 **폭**뿐이고, 그 계수가 사람마다 4%밖에 안 흔들린다.
      */
     val parallelShinTolerance: Float = 0.062f,
+
+    /**
+     * 정강이 기준 `SHALLOW`/`PARALLEL` 경계의 폭. [shallowToleranceRatio]의 환산값이다.
+     *
+     * 환산 계수는 `legLength / tibiaLength`로 실측 3명이 2.075 / 2.018 / 2.100이었다
+     * ([standingShinDepth] 참고). 기본값에서는 [parallelShinTolerance]와 같다.
+     */
+    val shallowShinTolerance: Float = parallelShinTolerance,
 
     /**
      * 최저점의 무릎폭/발목폭이 **선 자세 기준선의 이 배수 미만**이면 valgus로 본다.
@@ -451,7 +472,8 @@ data class FormThresholds(
     fun depthLevelByRatio(depthRatio: Float): DepthLevel = when {
         depthRatio <= standingDepthRatio -> DepthLevel.STANDING
         depthRatio >= deepDepthRatio -> DepthLevel.DEEP
-        depthRatio >= -parallelToleranceRatio -> DepthLevel.PARALLEL
+        // 얕은 쪽 경계만 별도 필드다 — "기준 완화"가 여기만 넓힌다.
+        depthRatio >= -shallowToleranceRatio -> DepthLevel.PARALLEL
         else -> DepthLevel.SHALLOW
     }
 
@@ -486,7 +508,7 @@ data class FormThresholds(
     fun depthLevelByShinDepth(shinDepth: Float): DepthLevel = when {
         shinDepth <= standingShinDepth -> DepthLevel.STANDING
         shinDepth >= parallelShinTolerance -> DepthLevel.DEEP
-        shinDepth >= -parallelShinTolerance -> DepthLevel.PARALLEL
+        shinDepth >= -shallowShinTolerance -> DepthLevel.PARALLEL
         else -> DepthLevel.SHALLOW
     }
 
@@ -603,6 +625,41 @@ data class FormThresholds(
         const val RELAXED_KNEE_TOE_TOLERANCE = 0.15f
 
         /**
+         * "기준 완화"를 켰을 때 쓰는 [shallowToleranceRatio]. **0.10.**
+         *
+         * ## 무슨 뜻인가
+         * `depthRatio`는 `(엉덩이.y − 무릎.y) / 다리 길이`이므로, −0.10은 **엉덩이가 무릎보다
+         * 다리 길이의 10%만큼 위**인 지점이다. 다리 길이 85cm인 사람이면 무릎 높이에서
+         * 약 8.5cm 위까지를 "적당"으로 본다.
+         *
+         * 기본값 0.03은 **측정 오차**의 폭이다(관절 중심 추정 오차 대퇴 3°의 환산).
+         * 0.10은 성격이 다르다 — 오차가 아니라 **"이 정도면 됐다고 볼 것인가"**라는 판단이다.
+         *
+         * ## ⚠ 사용자 판단이다 ([ThresholdOrigin.PROVISIONAL])
+         * *"일반인이 운동할 때 적당한 수치"*라는 사용자 판단으로 정했다(2026-08-24).
+         * **실측에서 나온 값이 아니다** — 이 프로젝트의 다른 깊이 임계값들과 근거의 성격이
+         * 다르므로 섞어 읽지 말 것.
+         *
+         * 참고할 실측은 있다: 측면 44 rep의 최저점이 −0.118~+0.177로 흩어졌고, 사람별
+         * 중앙값이 −0.043 / +0.046 / +0.149였다. **−0.10이면 그 세 사람이 전부 "적당" 안에
+         * 들어온다**(가장 얕았던 사람의 중앙값 −0.043도 여유 있게 통과). 기본값 −0.03에서는
+         * 한 명이 걸렸다.
+         *
+         * ## 얕은 쪽만 넓힌다
+         * [deepDepthRatio]는 그대로 +0.03이다. 더 깊게 앉는 것은 문제가 아니므로 완화할
+         * 이유가 없고, 함께 밀면 완화를 켰을 때 "깊음"이 "적당"으로 내려앉는다.
+         */
+        const val RELAXED_SHALLOW_TOLERANCE = 0.10f
+
+        /**
+         * [RELAXED_SHALLOW_TOLERANCE]의 정강이 기준 환산값. `0.10 × 2.075 ≈ 0.208`.
+         *
+         * 계수는 [standingShinDepth]가 쓴 것과 같다 — 실측 3명의 `다리/정강이`가
+         * 2.075 / 2.018 / 2.100으로 폭 4%였고 중앙값을 썼다.
+         */
+        const val RELAXED_SHALLOW_SHIN_TOLERANCE = 0.208f
+
+        /**
          * 각 값의 출처. 데이터 측 확정값이 오면 여기가 [ThresholdOrigin.DATA_DERIVED]로 바뀐다.
          *
          * 각도 기준 깊이 임계값(`standingAngle`/`shallowAngle`/`deepAngle`)은 설계문서
@@ -619,6 +676,10 @@ data class FormThresholds(
             // 깊이 — 정강이 기준(기준선 없음). 위 두 값의 환산이고 계수는 실측 3명 2.018~2.100.
             "standingShinDepth" to ThresholdOrigin.DATA_DERIVED,
             "parallelShinTolerance" to ThresholdOrigin.DEFINITION,
+            // 기본값은 위 둘과 같은 값(측정 오차)이라 출처도 같다. "기준 완화"가 갈아끼우는
+            // 값(RELAXED_SHALLOW_TOLERANCE)만 사용자 판단이고, 그건 상수 주석에 적었다.
+            "shallowToleranceRatio" to ThresholdOrigin.DEFINITION,
+            "shallowShinTolerance" to ThresholdOrigin.DEFINITION,
             "valgusSpreadGain" to ThresholdOrigin.PROVISIONAL,
             // 측면 3세션 rep 내부 1875프레임. 정상 최대 41.1° 대비 오탐 0%.
             // 사람 간 변동이 사람 내의 0.44배로, 정규화 없이 공통 임계값을 쓸 수 있다.
