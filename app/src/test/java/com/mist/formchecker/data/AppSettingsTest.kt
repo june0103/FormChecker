@@ -250,4 +250,48 @@ class AppSettingsTest {
         assertTrue(reopened.relaxedForm.first())
         second.cancel()
     }
+
+    // ── 하루 목표 ─────────────────────────────────────────
+
+    /**
+     * 저장 전에는 null이다. **기본 목표를 저장소가 지어내면 안 된다** — 사용자가 정하지도
+     * 않은 숫자에 미달한 상태로 홈이 열린다.
+     */
+    @Test
+    fun `목표를 정하기 전에는 없음이다`() = runTest {
+        assertNull(settings().dailyRepGoal.first())
+    }
+
+    @Test
+    fun `정한 목표를 읽는다`() = runTest {
+        val store = settings()
+        store.setDailyRepGoal(30)
+        assertEquals(30, store.dailyRepGoal.first())
+    }
+
+    /** 범위 밖은 저장하지 않는다. 오타로 들어온 값이 디스크에 남으면 화면에서 되돌릴 수 없다. */
+    @Test
+    fun `범위를 벗어난 목표는 저장하지 않는다`() = runTest {
+        val store = settings()
+        store.setDailyRepGoal(30)
+        store.setDailyRepGoal(0)
+        store.setDailyRepGoal(DailyGoal.RANGE.last + 1)
+        assertEquals(30, store.dailyRepGoal.first())
+    }
+
+    @Test
+    fun `목표를 지우면 다시 없음이 된다`() = runTest {
+        val store = settings()
+        store.setDailyRepGoal(30)
+        store.clearDailyRepGoal()
+        assertNull(store.dailyRepGoal.first())
+    }
+
+    /** 증감 버튼이 경계를 넘지 않는다. */
+    @Test
+    fun `증감은 범위 안에서 움직인다`() {
+        assertEquals(DailyGoal.STEP, DailyGoal.step(0, DailyGoal.STEP))
+        assertEquals(DailyGoal.RANGE.first, DailyGoal.step(1, -DailyGoal.STEP))
+        assertEquals(DailyGoal.RANGE.last, DailyGoal.step(DailyGoal.RANGE.last, DailyGoal.STEP))
+    }
 }

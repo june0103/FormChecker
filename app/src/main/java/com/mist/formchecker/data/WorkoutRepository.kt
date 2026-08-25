@@ -4,6 +4,7 @@ import com.mist.formchecker.data.local.ErrorFlags
 import com.mist.formchecker.data.local.PerformanceMetricsEntity
 import com.mist.formchecker.data.local.RepRecordEntity
 import com.mist.formchecker.data.local.SessionListItem
+import com.mist.formchecker.data.local.SessionRepCount
 import com.mist.formchecker.data.local.WorkoutDao
 import com.mist.formchecker.data.local.WorkoutSessionEntity
 import com.mist.formchecker.data.local.WorkoutSetEntity
@@ -120,6 +121,18 @@ class WorkoutRepository @Inject constructor(
     fun metrics(sessionId: String) = dao.metricsOf(sessionId)
     fun sessions(): Flow<List<SessionListItem>> = dao.sessionList()
     fun pendingTotal(): Flow<Int> = dao.pendingTotal()
+
+    /**
+     * [fromMs, toMs) 안에 **시작한** 세션들의 횟수. 홈 화면 집계용.
+     *
+     * 경계를 호출부가 정한다 — 하루/한 주의 경계는 기기 시간대에 달렸고, 그 계산은
+     * 테스트할 수 있는 자리에 있어야 한다(`weekWindowOf`).
+     */
+    fun sessionRepCounts(fromMs: Long, toMs: Long): Flow<List<SessionRepCount>> =
+        dao.sessionRepCountsBetween(fromMs, toMs)
+
+    /** 지금까지 저장된 세션 수. 0이면 "아직 기록이 하나도 없다". */
+    fun sessionCount(): Flow<Int> = dao.sessionCount()
     suspend fun deleteSession(sessionId: String) = dao.deleteSession(sessionId)
 
     private fun CompletedRepInput.toEntity(setId: String) = RepRecordEntity(
