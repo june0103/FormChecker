@@ -50,7 +50,7 @@
 
 ### 임계값 상태 (`SquatThresholds.kt`의 `ORIGINS`가 정본)
 
-`FormThresholds`는 `DATA_DERIVED` 6개 · `DEFINITION` 4개 · `PROVISIONAL` 4개, `ReadyThresholds`는 `DATA_DERIVED` 1개 · `PROVISIONAL` 3개, 그리고 카운팅 임계값 7개는 전부 `PROVISIONAL`입니다.
+`FormThresholds` 16개(`DATA_DERIVED` 6 · `DEFINITION` 6 · `PROVISIONAL` 4), `AngleDetectionThresholds` 3개(2 · – · 1), `ReadyThresholds` 4개(1 · – · 3), `CountingThresholds` 7개는 전부 `PROVISIONAL`입니다.
 **새 판정을 추가하기 전에 `ThresholdOrigin`을 반드시 정하세요.** 근거 없는 숫자를 `PROVISIONAL` 표시 없이 넣으면 나중에 아무도 되돌릴 수 없습니다.
 
 깊이 판정은 무릎 각도를 **쓰지 않습니다**. 기준선이 있으면 다리 길이로, 없으면 정강이 길이로 정규화한 엉덩이 높이를 씁니다(`depthLevelByRatio` / `depthLevelByShinDepth`). 각도 경로는 실측에서 깊이 부족을 한 번도 잡지 못해 제거했습니다.
