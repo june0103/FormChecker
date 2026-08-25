@@ -1,12 +1,14 @@
 package com.mist.formchecker.ui.screen.home
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -40,6 +43,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.mist.formchecker.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.ui.component.IconAction
 import com.mist.formchecker.ui.component.glyphStrokeWidth
@@ -150,6 +154,15 @@ private fun HomeHeader(onOpenSettings: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Image(
+            // 런처 아이콘·스플래시와 **같은 심볼 원본**이다. 홈에서 다시 그리면
+            // 두 로고가 조용히 갈린다.
+            painter = painterResource(R.drawable.ic_formchecker_symbol),
+            // 바로 옆에 앱 이름이 글자로 있다. 스크린 리더가 같은 말을 두 번 하지 않게 둔다.
+            contentDescription = null,
+            modifier = Modifier.size(BrandMarkSize),
+        )
+        Spacer(Modifier.width(Spacing.sm))
         Text(
             text = "폼체커",
             style = MaterialTheme.typography.headlineSmall,
@@ -534,5 +547,7 @@ private fun HomeCard(content: @Composable ColumnScope.() -> Unit) {
 private val StartButtonHeight = 64.dp
 private val ProgressHeight = 10.dp
 private val CheckIconSize = 20.dp
+/** 헤더의 심볼. 앱 이름(headlineSmall, 24sp)과 눈높이가 맞는 크기다. */
+private val BrandMarkSize = 28.dp
 /** 조절 막대의 세로 위치와 손잡이의 가로 위치. 손잡이를 어긋나게 둬야 조절처럼 읽힌다. */
 private val SettingsRows = listOf(0.26f to 0.62f, 0.50f to 0.36f, 0.74f to 0.70f)
