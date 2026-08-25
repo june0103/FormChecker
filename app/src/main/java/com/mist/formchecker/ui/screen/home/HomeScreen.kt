@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,10 +32,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.component.glyphStrokeWidth
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
 import com.mist.formchecker.ui.theme.LimeGreen
@@ -148,12 +156,43 @@ private fun HomeHeader(onOpenSettings: () -> Unit) {
             color = TextPrimary,
             modifier = Modifier.weight(1f),
         )
-        TextButton(
+        IconAction(
+            label = "설정",
             onClick = onOpenSettings,
-            modifier = Modifier.heightIn(min = TouchTarget.minSize),
-        ) {
-            Text("설정", style = MaterialTheme.typography.labelLarge, color = TextMuted)
-        }
+            // 글자 없이 아이콘만 둔다. 다른 화면의 뒤로가기와 같은 규칙이고
+            // ([ScreenHeader]), 스크린 리더에는 label이 그대로 나간다.
+            showLabel = false,
+            glyph = { drawSettingsGlyph(it) },
+            // 아이콘 자체의 안쪽 여백(sm)만큼 밀어 글리프가 카드와 같은 오른쪽 선에
+            // 서게 한다. 과녁은 그대로 48dp다.
+            modifier = Modifier.offset(x = Spacing.sm),
+        )
+    }
+}
+
+/**
+ * 설정 아이콘 — 손잡이가 달린 조절 막대 셋.
+ *
+ * ## 왜 톱니바퀴가 아닌가
+ * 같은 굵기([glyphStrokeWidth])로 톱니바퀴를 그려 보니 **밝기 조절 아이콘(해)처럼**
+ * 읽혔다 — 이 앱의 글리프는 카메라 위에서도 보이도록 선이 굵어서, 톱니가 링에서 떨어진
+ * 짧은 막대가 된다. 조절 막대는 그 굵기에서도 뜻이 흔들리지 않는다.
+ *
+ * 선 두께는 [glyphStrokeWidth]에서 나온다 — 뒤로가기·카메라 전환과 한 가족으로 보여야 한다.
+ */
+private fun DrawScope.drawSettingsGlyph(color: Color) {
+    val stroke = glyphStrokeWidth * 0.75f
+    val knob = size.minDimension * 0.10f
+    SettingsRows.forEach { (yFraction, knobFraction) ->
+        val y = size.height * yFraction
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.14f, y),
+            end = Offset(size.width * 0.86f, y),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawCircle(color = color, radius = knob, center = Offset(size.width * knobFraction, y))
     }
 }
 
@@ -495,3 +534,5 @@ private fun HomeCard(content: @Composable ColumnScope.() -> Unit) {
 private val StartButtonHeight = 64.dp
 private val ProgressHeight = 10.dp
 private val CheckIconSize = 20.dp
+/** 조절 막대의 세로 위치와 손잡이의 가로 위치. 손잡이를 어긋나게 둬야 조절처럼 읽힌다. */
+private val SettingsRows = listOf(0.26f to 0.62f, 0.50f to 0.36f, 0.74f to 0.70f)
