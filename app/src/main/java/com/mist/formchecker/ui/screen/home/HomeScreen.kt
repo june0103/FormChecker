@@ -45,7 +45,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.mist.formchecker.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mist.formchecker.data.GuideKey
 import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.guide.CoachMarkOverlay
+import com.mist.formchecker.ui.guide.CoachMarkState
+import com.mist.formchecker.ui.guide.CoachSteps
+import com.mist.formchecker.ui.guide.GuideViewModel
+import com.mist.formchecker.ui.guide.MeasurementPrepSheet
+import com.mist.formchecker.ui.guide.PrepMode
+import com.mist.formchecker.ui.guide.PrepShortHint
+import com.mist.formchecker.ui.guide.coachAnchor
+import com.mist.formchecker.ui.guide.rememberCoachMarkState
 import com.mist.formchecker.ui.component.glyphStrokeWidth
 import com.mist.formchecker.ui.theme.BgBase
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -85,9 +95,16 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
+    guide: GuideViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var editingGoal by rememberSaveable { mutableStateOf(false) }
+    // 측정 준비 안내를 어떤 맥락에서 열었나. null이면 닫혀 있다.
+    var prepSheet by rememberSaveable { mutableStateOf<PrepMode?>(null) }
+
+    val prepSeen by guide.seen(GuideKey.MEASUREMENT_PREP).collectAsStateWithLifecycle()
+    val tutorialSeen by guide.seen(GuideKey.HOME_TUTORIAL).collectAsStateWithLifecycle()
+    val coach = rememberCoachMarkState()
     // 그래프에서 고른 날. null이면 오늘이다 — 날짜가 넘어가도 "오늘"을 계속 가리킨다.
     var pickedDay by rememberSaveable { mutableStateOf<Int?>(null) }
 
@@ -103,20 +120,51 @@ fun HomeScreen(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        HomeHeader(onOpenSettings = onOpenSettings)
+        HomeHeader(onOpenSettings = onOpenSettings, coach = coach)
 
         TodayGoalCard(
             state = state,
             onEditGoal = { editingGoal = true },
+            modifier = Modifier.coachAnchor(CoachSteps.Home.GOAL, coach),
         )
 
-        Button(
-            onClick = onStartWorkout,
-            modifier = Modifier.fillMaxWidth().heightIn(min = StartButtonHeight),
-        ) {
-            // 지금은 스쿼트뿐이지만 종목이 늘어난다. 홈은 종목 이름을 말하지 않는다 —
-            // 운동을 고르는 자리가 생기면 그때 이름이 붙는다.
-            Text("운동 시작", style = MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Button(
+                onClick = {
+                    // 첫 운동 전에는 측정 준비 안내를 먼저 본다. 아직 못 읽은 동안에는
+                    // 아무 데도 보내지 않는다 — 잘못 보내면 안내를 건너뛴 것이 된다.
+                    when (prepSeen) {
+                        false -> prepSheet = PrepMode.BEFORE_FIRST_WORKOUT
+                        true -> onStartWorkout()
+                        null -> Unit
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = StartButtonHeight)
+                    .coachAnchor(CoachSteps.Home.START, coach),
+            ) {
+                // 지금은 스쿼트뿐이지만 종목이 늘어난다. 홈은 종목 이름을 말하지 않는다 —
+                // 운동을 고르는 자리가 생기면 그때 이름이 붙는다.
+                Text("운동 시작", style = MaterialTheme.typography.titleMedium)
+            }
+
+            // 안내를 한 번 본 뒤에도 핵심 한 줄은 남긴다. 촬영 준비는 매번 필요한 것이지
+            // 한 번 읽고 끝나는 것이 아니다.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = PrepShortHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FeedbackInfo,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = { prepSheet = PrepMode.REVIEW },
+                    modifier = Modifier.heightIn(min = TouchTarget.minSize),
+                ) {
+                    Text("측정 팁", style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
 
         WeekCard(
@@ -124,16 +172,44 @@ fun HomeScreen(
             selectedIndex = pickedDay ?: state.todayIndex,
             onSelectDay = { pickedDay = it },
             onOpenSettings = onOpenSettings,
+            modifier = Modifier.coachAnchor(CoachSteps.Home.WEEK, coach),
         )
 
         OutlinedButton(
             onClick = onOpenHistory,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget.minSize),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = TouchTarget.minSize)
+                .coachAnchor(CoachSteps.Home.HISTORY, coach),
         ) {
             Text("기록 보기", style = MaterialTheme.typography.labelLarge)
         }
 
+        // 개발·검증용 영역은 **안내 대상이 아니다.** 코치마크 앵커를 달지 않는다.
         DevTools(onOpenCapture = onOpenCapture, onOpenWorkoutLab = onOpenWorkoutLab)
+    }
+
+    prepSheet?.let { mode ->
+        MeasurementPrepSheet(
+            mode = mode,
+            onDismiss = { prepSheet = null },
+            onReady = {
+                // `준비됐어요`를 눌렀을 때만 완료로 친다. 취소는 완료가 아니다.
+                guide.markSeen(GuideKey.MEASUREMENT_PREP)
+                prepSheet = null
+                onStartWorkout()
+            },
+        )
+    }
+
+    // 다른 안내가 떠 있는 동안에는 코치마크를 겹치지 않는다 — 안내가 두 겹이 되면
+    // 어느 쪽을 읽어야 하는지 알 수 없다.
+    if (tutorialSeen == false && prepSheet == null && !editingGoal) {
+        CoachMarkOverlay(
+            state = coach,
+            steps = CoachSteps.home,
+            onFinish = { guide.markSeen(GuideKey.HOME_TUTORIAL) },
+        )
     }
 
     if (editingGoal) {
@@ -149,7 +225,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeHeader(onOpenSettings: () -> Unit) {
+private fun HomeHeader(onOpenSettings: () -> Unit, coach: CoachMarkState) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
         verticalAlignment = Alignment.CenterVertically,
@@ -178,7 +254,9 @@ private fun HomeHeader(onOpenSettings: () -> Unit) {
             glyph = { drawSettingsGlyph(it) },
             // 아이콘 자체의 안쪽 여백(sm)만큼 밀어 글리프가 카드와 같은 오른쪽 선에
             // 서게 한다. 과녁은 그대로 48dp다.
-            modifier = Modifier.offset(x = Spacing.sm),
+            modifier = Modifier
+                .offset(x = Spacing.sm)
+                .coachAnchor(CoachSteps.Home.SETTINGS, coach),
         )
     }
 }
@@ -221,10 +299,14 @@ private fun DrawScope.drawSettingsGlyph(color: Color) {
  * 기록에서 사라진 것처럼 보인다.
  */
 @Composable
-private fun TodayGoalCard(state: HomeUiState, onEditGoal: () -> Unit) {
+private fun TodayGoalCard(
+    state: HomeUiState,
+    onEditGoal: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val progress = state.goalProgress
 
-    HomeCard {
+    HomeCard(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "오늘의 목표",
@@ -334,8 +416,9 @@ private fun WeekCard(
     selectedIndex: Int,
     onSelectDay: (Int) -> Unit,
     onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    HomeCard {
+    HomeCard(modifier = modifier) {
         Text(
             text = "이번 주 운동",
             style = MaterialTheme.typography.titleSmall,
@@ -532,9 +615,12 @@ private fun DevButton(label: String, onClick: () -> Unit, modifier: Modifier = M
 }
 
 @Composable
-private fun HomeCard(content: @Composable ColumnScope.() -> Unit) {
+private fun HomeCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.lg))
             .background(SurfaceCard)

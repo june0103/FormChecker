@@ -34,7 +34,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mist.formchecker.poseengine.PoseVisibility
 import com.mist.formchecker.ui.screen.PlaceholderAction
+import com.mist.formchecker.data.GuideKey
 import com.mist.formchecker.ui.component.IconAction
+import com.mist.formchecker.ui.guide.CoachMarkOverlay
+import com.mist.formchecker.ui.guide.CoachMarkState
+import com.mist.formchecker.ui.guide.CoachSteps
+import com.mist.formchecker.ui.guide.GuideViewModel
+import com.mist.formchecker.ui.guide.coachAnchor
+import com.mist.formchecker.ui.guide.rememberCoachMarkState
 import com.mist.formchecker.ui.component.drawBackGlyph
 import com.mist.formchecker.ui.screen.PlaceholderScreen
 import com.mist.formchecker.ui.theme.FeedbackInfo
@@ -130,6 +137,11 @@ private fun ExerciseContent(
     var showExample by remember { mutableStateOf(false) }
     val autoShowExample by viewModel.showFormExample.collectAsStateWithLifecycle()
 
+    val guide: GuideViewModel = hiltViewModel()
+    val tutorialSeen by guide.seen(GuideKey.WORKOUT_TUTORIAL).collectAsStateWithLifecycle()
+    val coach = rememberCoachMarkState()
+    val exampleOpen = showExample || autoShowExample
+
     Column(modifier = modifier.fillMaxSize()) {
         // ── 프리뷰: 상단 고정, 화면 폭 전부 ────────────────────
         //
@@ -157,6 +169,7 @@ private fun ExerciseContent(
                 .fillMaxWidth()
                 // 분석 프레임과 같은 3:4. 다르면 프리뷰가 잘려 스켈레톤이 몸에서 어긋난다.
                 .aspectRatio(3f / 4f)
+                .coachAnchor(CoachSteps.Workout.PREVIEW, coach)
                 .background(Color.Black),
         ) {
                 if (analyzer != null) {
@@ -175,6 +188,7 @@ private fun ExerciseContent(
                         onReset = viewModel::resetRepCount,
                         onToggleCamera = viewModel::toggleCamera,
                         onShowExample = { showExample = true },
+                        coach = coach,
                         // 아이콘이 작아져 실수로 눌릴 수 있다. 센 횟수가 있으면 먼저 묻는다.
                         onBack = { if (state.repCount > 0) exitConfirm = true else onBack() },
                         modifier = Modifier.fillMaxSize(),
@@ -204,6 +218,7 @@ private fun ExerciseContent(
             // 고르게 두면 잘못 고른 채로 운동해도 앱이 아무 말 없이 틀린 판정을 낸다.
             CalibrationBar(
                 state = state,
+                modifier = Modifier.coachAnchor(CoachSteps.Workout.CALIBRATION, coach),
                 onStart = viewModel::startCalibration,
                 onCancel = viewModel::cancelCalibration,
                     // 설명·수치를 ⓘ 뒤로 접는다. 이 화면은 기기를 세워두고 전신이 들어올 만큼
@@ -229,14 +244,33 @@ private fun ExerciseContent(
                         onDiscarded = { emptyFinish = true },
                     )
                 },
-                modifier = Modifier.fillMaxWidth().height(TouchTarget.minSize),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(TouchTarget.minSize)
+                    .coachAnchor(CoachSteps.Workout.FINISH, coach),
             ) {
                 Text("운동 종료", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
 
-    if (showExample || autoShowExample) {
+    // ## 순서를 지킨다
+    // 카메라 권한 → 동작 예시 → 코치마크 → (사용자가 직접) 기준 자세 재기.
+    // 기준 자세를 재는 중이거나 이미 세고 있는 동안에는 띄우지 않는다 — 그때 화면을
+    // 덮으면 카메라 앞에 서 있는 사람이 자기 자세를 볼 수 없다.
+    val readyForCoach = !exampleOpen &&
+        state.calibrationStage == CalibrationStage.NONE &&
+        !state.countingEnabled &&
+        state.repCount == 0
+    if (tutorialSeen == false && readyForCoach) {
+        CoachMarkOverlay(
+            state = coach,
+            steps = CoachSteps.workout,
+            onFinish = { guide.markSeen(GuideKey.WORKOUT_TUTORIAL) },
+        )
+    }
+
+    if (exampleOpen) {
         SquatExampleSheet(
             onDismiss = {
                 showExample = false
@@ -346,6 +380,7 @@ private fun ExerciseHud(
     onToggleCamera: () -> Unit,
     onShowExample: () -> Unit,
     onBack: () -> Unit,
+    coach: CoachMarkState,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.SpaceBetween) {
@@ -378,11 +413,15 @@ private fun ExerciseHud(
                     onClick = onBack,
                     showLabel = false,
                     glyph = { drawBackGlyph(it) },
+                    modifier = Modifier.coachAnchor(CoachSteps.Workout.BACK, coach),
                 )
                 // 오른쪽 위에 둘을 나란히 둔다. **아래 컨트롤 줄에 넣지 않는다** —
                 // 거기는 지금 할 일(기준 자세 재기 → 운동 종료)만 있는 자리이고,
                 // 동작 예시는 시작하기 전에 한 번 보는 것이다.
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    modifier = Modifier.coachAnchor(CoachSteps.Workout.HUD_ACTIONS, coach),
+                ) {
                     IconAction(
                         label = "동작 예시",
                         onClick = onShowExample,
@@ -398,7 +437,10 @@ private fun ExerciseHud(
                 }
             }
 
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier.coachAnchor(CoachSteps.Workout.REP_COUNT, coach),
+            ) {
                 Text(
                     text = state.repCount.toString(),
                     // 세 자리는 좁은 화면에서 잘리므로 축약 스타일로 바꾼다.
@@ -458,6 +500,7 @@ private fun ExerciseHud(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .coachAnchor(CoachSteps.Workout.FEEDBACK, coach)
                 .background(
                     Brush.verticalGradient(listOf(Color.Transparent, Scrim.copy(alpha = 0.8f))),
                 )
