@@ -75,6 +75,31 @@ class AppSettings @Inject constructor(
     }
 
     /**
+     * 하루에 하려는 스쿼트 횟수. **세트가 아니라 하루 총횟수다.**
+     *
+     * ## 왜 여기(설정)에 있나
+     * 목표는 **사용자가 정한 값**이지 운동에서 나온 기록이 아니다. Room에 넣으면 세션
+     * 테이블에 "이 행은 측정한 것이 아니다"라는 예외가 생기고, 목표를 바꿀 때마다 과거
+     * 기록이 흔들린다.
+     *
+     * @return 저장된 값이 없으면 null. **기본 목표를 여기서 정하지 않는다** — 앱이 임의의
+     *   숫자를 사실처럼 보여주면 사용자가 정하지도 않은 목표에 미달한 것이 된다.
+     *   호출부는 null을 "아직 안 정함"으로 그려야 한다.
+     */
+    val dailyRepGoal: Flow<Int?> = store.data.map { it[KEY_DAILY_REP_GOAL] }
+
+    /** 목표를 저장한다. 범위를 벗어난 값은 저장하지 않는다([DailyGoal]). */
+    suspend fun setDailyRepGoal(reps: Int) {
+        if (!DailyGoal.valid(reps)) return
+        store.edit { it[KEY_DAILY_REP_GOAL] = reps }
+    }
+
+    /** 목표를 지운다. 다시 "아직 안 정함" 상태가 된다. */
+    suspend fun clearDailyRepGoal() {
+        store.edit { it.remove(KEY_DAILY_REP_GOAL) }
+    }
+
+    /**
      * 저장된 신체 정보 **원값**. 없는 값은 null이고, 반쯤 입력된 상태도 그대로 나온다.
      *
      * ## 왜 원값이 필요한가 — 감췄더니 데이터가 지워졌다
@@ -153,6 +178,7 @@ class AppSettings @Inject constructor(
         val KEY_AGE = intPreferencesKey("body_age")
         val KEY_SEX = stringPreferencesKey("body_sex")
         val KEY_RELAXED_FORM = booleanPreferencesKey("relaxed_form")
+        val KEY_DAILY_REP_GOAL = intPreferencesKey("daily_rep_goal")
     }
 }
 
@@ -205,4 +231,24 @@ data class BodyProfile(
         fun weightValid(kg: Float) = kg in WEIGHT_RANGE_KG
         fun ageValid(age: Int) = age in AGE_RANGE
     }
+}
+
+/**
+ * 하루 목표 횟수의 범위.
+ *
+ * ## 판정 임계값이 아니다
+ * [BodyProfile]의 범위와 같은 성격 — **오타 방어**다. 목표에 3000을 넣으면 진행률이
+ * 영원히 1%대에 머무는데 그게 잘못 누른 결과라는 것을 화면이 말해주지 않는다. 운동
+ * 생리학적 권장량이 아니므로 "몇 회가 적당한가"를 앱이 정하지 않는다.
+ *
+ * [STEP]은 증감 버튼의 폭이다. 1회씩 올리면 30회를 맞추는 데 30번을 눌러야 한다.
+ */
+object DailyGoal {
+    val RANGE = 1..500
+    const val STEP = 5
+
+    fun valid(reps: Int) = reps in RANGE
+
+    /** 증감 버튼이 쓰는 값. 범위를 벗어나면 경계에 붙인다. */
+    fun step(current: Int, delta: Int): Int = (current + delta).coerceIn(RANGE)
 }

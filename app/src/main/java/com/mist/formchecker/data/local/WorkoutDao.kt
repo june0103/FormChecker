@@ -1,5 +1,6 @@
 package com.mist.formchecker.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Insert
@@ -21,6 +22,18 @@ data class SessionListItem(
     val warnedRepCount: Int,
     /** 아직 서버로 안 보낸 행 수(세션 자신 + 그 아래 rep). 기록 화면의 pending 배지 재료. */
     val pendingCount: Int,
+)
+
+/**
+ * 세션 하나의 시작 시각과 횟수. **홈 화면 집계 재료다.**
+ *
+ * 날짜별로 묶는 일을 SQL에서 하지 않는 이유: 하루의 경계는 **기기 시간대**에 달렸는데,
+ * SQLite에 시간대를 넘기면 그 계산이 쿼리 문자열 안에 숨어 테스트할 수 없다. 대신 주
+ * 범위만 SQL로 자르고(한 주면 세션 수십 개), 날짜 버킷은 순수 함수가 나눈다.
+ */
+data class SessionRepCount(
+    @ColumnInfo(name = "started_at") val startedAt: Long,
+    val repCount: Int,
 )
 
 @Dao
@@ -103,6 +116,31 @@ interface WorkoutDao {
         """,
     )
     fun sessionList(): Flow<List<SessionListItem>>
+
+    /**
+     * 주어진 기간에 시작한 세션의 횟수. 홈 화면의 오늘·이번 주 집계가 쓴다.
+     *
+     * **rep 행을 앱으로 끌어오지 않는다** — 기록이 쌓여도 읽는 양이 그 주의 세션 수로
+     * 고정된다. 세션이 자정을 넘겨 이어져도 **시작 시각의 날짜**로 센다(한 세션이 두 날에
+     * 쪼개지면 "그날 몇 회 했나"가 사용자가 기억하는 것과 어긋난다).
+     */
+    @Query(
+        """
+        SELECT
+          sess.started_at AS started_at,
+          (SELECT COUNT(*) FROM rep_records r
+             JOIN workout_sets s ON r.set_id = s.id
+            WHERE s.session_id = sess.id) AS repCount
+        FROM workout_sessions sess
+        WHERE sess.started_at >= :fromMs AND sess.started_at < :toMs
+        ORDER BY sess.started_at
+        """,
+    )
+    fun sessionRepCountsBetween(fromMs: Long, toMs: Long): Flow<List<SessionRepCount>>
+
+    /** 기록이 하나라도 있나. "아직 아무것도 안 했다"와 "이번 주만 비었다"를 가른다. */
+    @Query("SELECT COUNT(*) FROM workout_sessions")
+    fun sessionCount(): Flow<Int>
 
     /** 기록 화면 상단 배지. 세션 전체에서 안 보낸 행 수. */
     @Query(

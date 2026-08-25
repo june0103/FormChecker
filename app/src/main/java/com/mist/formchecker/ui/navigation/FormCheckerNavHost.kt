@@ -9,7 +9,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.mist.formchecker.ui.screen.HistoryScreen
-import com.mist.formchecker.ui.screen.HomeScreen
+import com.mist.formchecker.ui.screen.home.HomeScreen
 import com.mist.formchecker.ui.screen.SessionSummaryScreen
 import com.mist.formchecker.ui.screen.SettingsScreen
 import com.mist.formchecker.ui.splash.FormCheckerSplash
