@@ -27,7 +27,8 @@ import org.tensorflow.lite.Interpreter
  * 일치해서, 학습 데이터와 모델 출력이 1:1로 대응한다(MoveNet은 26개 중 9개를 버려야 했다).
  *
  * 비용은 추론 시간이다. 실기 측정 기준 MoveNet 13~16ms vs 이 모델 26.8~36.5ms로,
- * 30fps 예산(33ms) 경계에 걸친다. [MoveNetPoseEngine]을 남겨둔 이유는 (1) 성능 비교
+ * 30fps 예산(33ms) 경계에 걸친다. **입력 벌크 쓰기 개선 뒤 프레임 전체가 p95 37.18ms이고
+ * 여전히 33ms를 넘는다** (`FramePipelineBenchmark`) — 이 모델을 쓰는 한 30fps는 못 맞춘다. [MoveNetPoseEngine]을 남겨둔 이유는 (1) 성능 비교
  * 근거를 유지하고 (2) 저사양 기기 폴백 여지를 남기기 위함이다.
  *
  * ## 왜 `CompiledModel`이 아니라 `Interpreter`인가
@@ -35,13 +36,26 @@ import org.tensorflow.lite.Interpreter
  * 이 엔진은 전달받은 참조 구현을 최소 변경으로 이식해 클래식 `Interpreter` API를 쓴다.
  * LiteRT 2.1.5 AAR에 `org.tensorflow.lite.Interpreter`가 포함돼 있어 의존성 추가는 필요 없다.
  *
- * ⚠ `Interpreter`에는 `addDelegate`가 없어 GPU 가속을 시도할 수 없다. 다만 RTMPose는 SimCC
- * 헤드라 MoveNet의 `GATHER_ND`(GPU 미지원 연산)가 없으므로, `CompiledModel`로 옮기면 GPU가
- * 붙을 가능성이 있다. 추론 시간이 문제가 되면 가장 먼저 시도할 개선 경로다.
+ * `Interpreter`에는 `addDelegate`가 없어 GPU 가속을 시도할 수 없다. **그래서 `CompiledModel`로
+ * 옮겨봤고, 재봤고, 옮기지 않기로 했다.**
  *
- * `Interpreter`에는 `addDelegate`가 없어 GPU 가속을 시도할 수 없다. 채택 시 `CompiledModel`로
- * 옮기면서 GPU를 시험해볼 수 있다 — RTMPose는 SimCC 헤드라 MoveNet의 `GATHER_ND`가 없어
- * GPU가 붙을 가능성이 있다.
+ * ## ⚠ GPU 가설은 반증됐다 (실측 2026-08-28)
+ * 예전에 이 자리에는 *"RTMPose는 SimCC 헤드라 MoveNet의 `GATHER_ND`(GPU 미지원 연산)가
+ * 없으므로 `CompiledModel`로 옮기면 GPU가 붙을 가능성이 있다"* 고 적혀 있었다.
+ * **그렇지 않았다.**
+ *
+ * | 경로 | p95 |
+ * |---|---|
+ * | `Interpreter` · CPU (현재) | 35.82 ms |
+ * | `CompiledModel` · CPU | 35.74 ms (**1.00배**) |
+ * | `CompiledModel` · GPU | **실패** — `LiteRtException: Failed to compile model` |
+ *
+ * GPU는 붙지 않고, CPU 성능은 두 API가 같다. **옮길 이유가 없다** — 위험만 있고 얻는 것이
+ * 없다. 근거는 `DelegateBenchmark`(Galaxy S24 Ultra · Android 16).
+ *
+ * `GATHER_ND` 하나만 보고 "GPU가 붙을 것"이라고 추측한 것이 틀렸다. GPU delegate가 요구하는
+ * 것은 연산 하나가 아니라 그래프 전체다. **다른 기기·다른 LiteRT 버전에서는 결과가 다를 수
+ * 있으니, 재시도할 때는 이 벤치마크를 다시 돌릴 것.**
  *
  * ## 모델 입출력 (파일을 직접 파싱해 확인)
  * ```
@@ -74,6 +88,27 @@ class RtmPoseEngine private constructor(
     private val inputBuffer: ByteBuffer =
         ByteBuffer.allocateDirect(INPUT_WIDTH * INPUT_HEIGHT * 3 * 4)
             .order(ByteOrder.nativeOrder())
+
+    /**
+     * [inputBuffer]에 한 번에 부어 넣을 값을 모으는 자리.
+     *
+     * **`putFloat`를 147,456번 부르지 않기 위한 것이다.** 실측(`DelegateBenchmark`)에서
+     * 한 개씩 넣으면 p95 **4.44ms**, 이 배열에 모아 벌크로 쓰면 **0.19ms**였다 — **23배**.
+     * 프레임당 4.25ms이고, 센서 회전 보정을 CameraX에 넘겨 아낀 3.14ms보다 크다.
+     *
+     * `putFloat` 호출마다 경계 검사와 위치 갱신이 들어가는데, 그게 15만 번이면 순전파
+     * 시간(35.8ms)의 12%가 된다.
+     */
+    private val inputFloats = FloatArray(INPUT_WIDTH * INPUT_HEIGHT * 3)
+
+    /**
+     * [inputBuffer]의 float 뷰. **필드로 들고 있는 이유**는 `asFloatBuffer()`가 호출할
+     * 때마다 뷰 객체를 새로 만들기 때문이다 — 프레임마다 부르면 그 자체가 할당이 된다.
+     *
+     * 이 뷰는 [inputBuffer]와 위치를 공유하지 않으므로, 여기에 써도 [inputBuffer]의
+     * position은 0에 머문다. `Interpreter`는 position부터 읽으므로 그대로 맞다.
+     */
+    private val inputFloatView = inputBuffer.asFloatBuffer()
 
     private val simccX = Array(1) { Array(KeypointType.COUNT) { FloatArray(simccXBins) } }
     private val simccY = Array(1) { Array(KeypointType.COUNT) { FloatArray(simccYBins) } }
@@ -131,12 +166,16 @@ class RtmPoseEngine private constructor(
         inputCanvas.drawBitmap(frame, null, dstRect, null)
         inputBitmap.getPixels(pixelBuffer, 0, INPUT_WIDTH, 0, 0, INPUT_WIDTH, INPUT_HEIGHT)
 
-        inputBuffer.rewind()
+        // 배열에 모았다가 **한 번에** 붓는다. `putFloat`를 픽셀마다 세 번씩 부르면
+        // 15만 번이 되고, 실측에서 그것만으로 프레임당 4.4ms가 든다 ([inputFloats] 참고).
+        var i = 0
         for (pixel in pixelBuffer) {
-            inputBuffer.putFloat(((pixel shr 16) and 0xFF).toFloat())  // R
-            inputBuffer.putFloat(((pixel shr 8) and 0xFF).toFloat())   // G
-            inputBuffer.putFloat((pixel and 0xFF).toFloat())           // B
+            inputFloats[i++] = ((pixel shr 16) and 0xFF).toFloat()  // R
+            inputFloats[i++] = ((pixel shr 8) and 0xFF).toFloat()   // G
+            inputFloats[i++] = (pixel and 0xFF).toFloat()           // B
         }
+        inputFloatView.rewind()
+        inputFloatView.put(inputFloats)
         inputBuffer.rewind()
     }
 
