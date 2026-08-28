@@ -238,9 +238,9 @@ class DbQueryBenchmark {
         report("동기화 ② 워커 배치 조회 500건 (미전송 1% 가정)", batch)
     }
 
-    private inline fun measureWithSyncIndex(enabled: Boolean, block: () -> Unit): Double {
+    private inline fun measureWithSyncIndex(enabled: Boolean, block: () -> Unit): Stats {
         setSyncIndex(enabled)
-        return medianMillis(block)
+        return measure(block)
     }
 
     /**
@@ -291,9 +291,9 @@ class DbQueryBenchmark {
             val args = argsOf(size)
             Row(
                 sessions = size,
-                millis = cases.map { case ->
+                stats = cases.map { case ->
                     setIndex(case.index)
-                    medianMillis { query(case.sql, args) }
+                    measure { query(case.sql, args) }
                 },
             )
         }.also { rows -> rows.forEach { it.labels = cases.map(Case::label) } }
@@ -442,16 +442,40 @@ class DbQueryBenchmark {
     }
 
     /**
-     * [WARMUP]회 버린 뒤 [RUNS]회의 **중앙값**을 낸다.
+     * 한 후보의 실행 시간 분포. **대표값 하나로 줄이지 않는다.**
      *
-     * 평균이 아닌 이유: 백그라운드 작업이 한 번만 끼어들어도 평균이 통째로 흔들린다.
+     * @property p50 중앙값. "보통 이 정도"
+     * @property p95 상위 5% 경계. **판단은 이 값으로 한다**
+     * @property max 최악의 한 번
+     */
+    private class Stats(val p50: Double, val p95: Double, val max: Double)
+
+    /**
+     * [WARMUP]회 버린 뒤 [RUNS]회를 재서 **분포**를 낸다.
+     *
+     * ## 왜 평균도 중앙값도 아닌가
+     * 평균은 백그라운드 작업이 한 번만 끼어들어도 통째로 흔들린다. 그래서 처음에는
+     * 중앙값을 썼는데, **중앙값만 쓰는 것도 같은 종류의 실수**였다 — 절반의 실행이
+     * 그보다 느리다는 사실이 숫자에서 사라진다.
+     *
+     * 사용자가 겪는 것은 평균적인 실행이 아니라 **느린 실행**이다. 기록 화면을 열 때
+     * 중앙값이 16ms라도 p95가 40ms면 열 번에 한 번은 눈에 띄게 늦게 뜬다. 그래서
+     * **p95를 판단 기준으로 두고 최댓값을 함께 적는다.**
+     *
+     * ## p95의 정밀도 한계
+     * [RUNS]회 표본의 p95는 상위 몇 개 값에 좌우된다 — 정확한 분위수라기보다 **"느린
+     * 쪽이 얼마나 느린가"의 지표**로 읽어야 한다. 표본을 크게 늘려도 기기 상태가
+     * 변하는 시간이 함께 늘어나 더 정확해지지 않는다.
+     *
      * 첫 실행을 버리는 이유: 페이지 캐시와 준비된 구문이 비어 있어 다른 것을 잰다.
      */
-    private inline fun medianMillis(block: () -> Unit): Double {
+    private inline fun measure(block: () -> Unit): Stats {
         repeat(WARMUP) { block() }
         val times = DoubleArray(RUNS) { measureNanoTime { block() } / 1_000_000.0 }
         times.sort()
-        return times[RUNS / 2]
+        // 최근접 순위법: p분위 = 올림(p × n)번째 값.
+        val p95Index = (kotlin.math.ceil(0.95 * RUNS).toInt() - 1).coerceIn(0, RUNS - 1)
+        return Stats(p50 = times[RUNS / 2], p95 = times[p95Index], max = times[RUNS - 1])
     }
 
     private fun explain(sql: String, args: Array<Any>? = null): String {
@@ -487,26 +511,49 @@ class DbQueryBenchmark {
         }
     }
 
-    private class Row(val sessions: Int, val millis: List<Double>) {
+    private class Row(val sessions: Int, val stats: List<Stats>) {
         var labels: List<String> = emptyList()
     }
 
-    /** 첫 후보를 기준(1.0배)으로 두고 나머지를 배수로 적는다. */
+    /**
+     * 표 두 개를 낸다.
+     *
+     * 1. **부하 곡선** — 크기별 p95. 세로로 읽으면 "커질 때 어떻게 되는가"가 보인다
+     * 2. **가장 큰 크기의 분포** — p50 / p95 / 최대. 가로로 읽으면 "얼마나 흔들리는가"
+     *
+     * 한 표에 다 넣으면 칸마다 숫자가 셋이라 곡선 모양이 안 읽힌다. 곡선은 하나의
+     * 지표로 그리고, 분포는 가장 아픈 지점에서만 펼친다.
+     */
     private fun report(title: String, rows: List<Row>) {
         val labels = rows.first().labels
         log("\n### $title")
-        log("세션당 rep ${REPS_PER_SESSION}개 · 웜업 ${WARMUP}회 후 ${RUNS}회 중앙값 · 배수는 첫 열 대비\n")
+        log("세션당 rep ${REPS_PER_SESSION}개 · 웜업 ${WARMUP}회 후 ${RUNS}회 · 배수는 첫 열 대비\n")
+
+        log("**부하 곡선 (p95)** — 판단은 이 값으로 한다\n")
         log("| 세션 | rep 총계 | " + labels.joinToString(" | ") + " |")
         log("|---|---|" + labels.joinToString("") { "---|" })
         rows.forEach { r ->
-            val base = r.millis.first()
-            val cells = r.millis.mapIndexed { i, ms ->
-                if (i == 0) "%.2f ms".format(ms)
-                else "%.2f ms (%.1f배)".format(ms, if (ms > 0) base / ms else 0.0)
+            val base = r.stats.first().p95
+            val cells = r.stats.mapIndexed { i, s ->
+                if (i == 0) "%.2f ms".format(s.p95)
+                else "%.2f ms (%.1f배)".format(s.p95, if (s.p95 > 0) base / s.p95 else 0.0)
             }
             log(
                 "| %,d | %,d | %s |".format(
                     r.sessions, r.sessions * REPS_PER_SESSION, cells.joinToString(" | "),
+                ),
+            )
+        }
+
+        val worst = rows.last()
+        log("\n**분포 (세션 %,d개)** — 사용자가 겪는 것은 평균이 아니라 느린 실행이다\n"
+            .format(worst.sessions))
+        log("| 후보 | p50 | p95 | 최대 | 최대/p50 |")
+        log("|---|---|---|---|---|")
+        worst.stats.forEachIndexed { i, s ->
+            log(
+                "| %s | %.2f ms | **%.2f ms** | %.2f ms | %.1f배 |".format(
+                    labels[i], s.p50, s.p95, s.max, if (s.p50 > 0) s.max / s.p50 else 0.0,
                 ),
             )
         }
@@ -524,8 +571,18 @@ class DbQueryBenchmark {
         val SIZES = listOf(10, 100, 500, 2000)
         const val REPS_PER_SESSION = 20
 
-        const val WARMUP = 2
-        const val RUNS = 9
+        /** 페이지 캐시와 준비된 구문이 찰 때까지 버리는 횟수. */
+        const val WARMUP = 5
+
+        /**
+         * 표본 수. **p95를 내려면 9회로는 부족하다** — 9회의 p95는 사실상 최댓값이라
+         * 분포를 말해주지 못한다. 50회면 상위 3개 안에서 p95가 정해져 "느린 쪽"의
+         * 윤곽이 나온다.
+         *
+         * 더 늘리지 않는 이유: 표본을 키우면 측정에 걸리는 시간이 늘고, 그동안 기기
+         * 온도와 백그라운드 작업이 변해 **다른 조건을 섞어 재게 된다.**
+         */
+        const val RUNS = 50
 
         const val DAY_MS = 24 * 60 * 60 * 1000L
 
