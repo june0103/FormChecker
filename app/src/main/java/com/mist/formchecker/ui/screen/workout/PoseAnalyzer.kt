@@ -1,7 +1,5 @@
 package com.mist.formchecker.ui.screen.workout
 
-import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -41,10 +39,18 @@ data class PoseResult(
 /**
  * CameraX 프레임을 [PoseEngine]에 흘려보내는 분석기.
  *
- * ## 회전 처리
- * 센서는 기기 방향과 무관하게 고정된 방향으로 프레임을 준다. `rotationDegrees`를 적용하지
- * 않으면 세로로 든 기기에서 스켈레톤이 90도 누워서 그려지고, 각도 계산도 함께 틀어진다.
- * 기기마다 센서 장착 방향이 달라 특정 기기에서만 발생하는 종류의 버그라 처음부터 넣는다.
+ * ## 회전 처리는 CameraX가 한다
+ * 센서는 기기 방향과 무관하게 고정된 방향으로 프레임을 준다. 회전을 보정하지 않으면
+ * 세로로 든 기기에서 스켈레톤이 90도 누워서 그려지고, 각도 계산도 함께 틀어진다.
+ *
+ * 예전에는 **여기서** `Matrix`로 직접 돌렸는데, `Bitmap.createBitmap(.., matrix, ..)`은
+ * **새 Bitmap을 하나 더 만든다.** 480×640 ARGB_8888이면 프레임당 1.2MB가 추가로 할당되고
+ * 아무도 `recycle()`하지 않는다. 30fps로 흘리면 GC가 그만큼 자주 돌면서 **추론 스레드를
+ * 멈춰 세운다.**
+ *
+ * 지금은 `ImageAnalysis.Builder().setOutputImageRotationEnabled(true)`가 켜져 있어
+ * ([CameraPreview]) **이미 회전된 프레임이 들어온다.** 실측으로 회전 단계 p95 3.21ms와
+ * 300프레임당 GC 3회가 사라졌다 (`FramePipelineBenchmark`).
  *
  * ## 미러링을 여기서 하지 않는 이유 (중요)
  * 전면 카메라의 프리뷰는 거울처럼 좌우 반전돼 보이지만, `ImageAnalysis`가 주는 프레임은
@@ -62,11 +68,10 @@ class PoseAnalyzer(
     private val onFrameDropped: () -> Unit = {},
 ) : ImageAnalysis.Analyzer {
 
-    private val matrix = Matrix()
-
     override fun analyze(image: ImageProxy) {
         image.use { proxy ->
-            val upright = runCatching { proxy.toUprightBitmap() }.getOrNull()
+            // CameraX가 이미 회전을 적용해 준다 — 클래스 주석의 "회전 처리" 참고.
+            val upright = runCatching { proxy.toBitmap() }.getOrNull()
             if (upright == null) {
                 onFrameDropped()
                 return
@@ -90,16 +95,5 @@ class PoseAnalyzer(
                 ),
             )
         }
-    }
-
-    /** 센서 방향을 보정해 화면에서 보이는 것과 같은 방향의 비트맵을 만든다. */
-    private fun ImageProxy.toUprightBitmap(): Bitmap {
-        val source = toBitmap()
-        val degrees = imageInfo.rotationDegrees
-        if (degrees == 0) return source
-
-        matrix.reset()
-        matrix.postRotate(degrees.toFloat())
-        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
     }
 }
