@@ -25,6 +25,7 @@ object DatabaseModule {
                 FormCheckerDatabase.MIGRATION_1_2,
                 FormCheckerDatabase.MIGRATION_2_3,
                 FormCheckerDatabase.MIGRATION_3_4,
+                FormCheckerDatabase.MIGRATION_4_5,
             )
             .build()
 

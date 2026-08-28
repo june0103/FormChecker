@@ -96,22 +96,38 @@ interface WorkoutDao {
      *
      * `warned_count > 0`을 SQL에서 세는 이유: rep 행을 앱으로 끌어와 세면 세션 20개 ×
      * rep 30개 = 600행을 목록 표시에만 읽는다.
+     *
+     * ## 상관 서브쿼리를 쓰지 않는다
+     * 예전에는 세 값을 각각 서브쿼리로 셌다. 그러면 **세션 한 줄마다 서브쿼리가 3번**
+     * 돌아서, 세션이 N개일 때 3N번 실행된다 — SQL로 쓰인 N+1이다. 지금은 조인 한 번을
+     * `GROUP BY`로 접어 **rep 테이블을 한 번만 지나간다.**
+     *
+     * 실측(Galaxy S24 Ultra · Android 16 · `DbQueryBenchmark`): 세션 2,000개 · rep
+     * 40,000개에서 **21.4ms → 16.3ms**, 세션 100개부터 2,000개까지 일관되게 1.2~1.3배다.
+     * **극적인 차이는 아니다** — `workout_sets.session_id`와 `rep_records.set_id`에 이미
+     * 인덱스가 있어 서브쿼리도 매번 인덱스 탐색이었기 때문이다.
+     *
+     * rep을 미리 세션별로 집계해 조인하는 판(파생 테이블)도 재봤는데 **같은 속도**였다
+     * (16.8ms). SQL만 길어져서 버렸다.
+     *
+     * ## `COUNT(*)`가 아니라 `COUNT(r.id)`인 이유
+     * `LEFT JOIN`이라 **rep이 하나도 없는 세션도 한 줄로 남는데**, 그 줄은 rep 쪽이 전부
+     * NULL이다. `COUNT(*)`는 그 줄을 세어 **0이어야 할 곳에 1을 낸다.** `COUNT(r.id)`는
+     * NULL을 세지 않아 0이 된다. `SUM`도 같은 이유로 `COALESCE`가 필요하다 — 더할 것이
+     * 없으면 0이 아니라 NULL이다.
      */
     @Query(
         """
         SELECT
           sess.*,
-          (SELECT COUNT(*) FROM rep_records r
-             JOIN workout_sets s ON r.set_id = s.id
-            WHERE s.session_id = sess.id) AS repCount,
-          (SELECT COUNT(*) FROM rep_records r
-             JOIN workout_sets s ON r.set_id = s.id
-            WHERE s.session_id = sess.id AND r.warned_count > 0) AS warnedRepCount,
-          (CASE WHEN sess.sync_status = 'SYNCED' THEN 0 ELSE 1 END
-           + (SELECT COUNT(*) FROM rep_records r
-                JOIN workout_sets s ON r.set_id = s.id
-               WHERE s.session_id = sess.id AND r.sync_status != 'SYNCED')) AS pendingCount
+          COUNT(r.id) AS repCount,
+          COALESCE(SUM(CASE WHEN r.warned_count > 0 THEN 1 ELSE 0 END), 0) AS warnedRepCount,
+          (CASE WHEN sess.sync_status = 'SYNCED' THEN 0 ELSE 1 END)
+            + COALESCE(SUM(CASE WHEN r.sync_status != 'SYNCED' THEN 1 ELSE 0 END), 0) AS pendingCount
         FROM workout_sessions sess
+        LEFT JOIN workout_sets s ON s.session_id = sess.id
+        LEFT JOIN rep_records r ON r.set_id = s.id
+        GROUP BY sess.id
         ORDER BY sess.started_at DESC
         """,
     )
@@ -123,6 +139,29 @@ interface WorkoutDao {
      * **rep 행을 앱으로 끌어오지 않는다** — 기록이 쌓여도 읽는 양이 그 주의 세션 수로
      * 고정된다. 세션이 자정을 넘겨 이어져도 **시작 시각의 날짜**로 센다(한 세션이 두 날에
      * 쪼개지면 "그날 몇 회 했나"가 사용자가 기억하는 것과 어긋난다).
+     *
+     * **앱을 켤 때마다 부르는 쿼리다.** 성능은 `started_at` 인덱스에서 나온다
+     * ([WorkoutSessionEntity]) — 없으면 이번 주 몇 줄을 찾으려고 세션 테이블 전체를 훑는다.
+     *
+     * ## 여기서는 상관 서브쿼리를 그대로 둔다 (실측으로 확인)
+     * [sessionList]는 서브쿼리를 조인 + `GROUP BY`로 바꿔 빨라졌는데, **같은 변경을 여기
+     * 적용했더니 3배 느려졌다.** `GROUP BY sess.id`가 SQLite로 하여금 `started_at` 범위
+     * 탐색을 버리고 PK 순서로 전체를 훑게 만들기 때문이다:
+     *
+     * ```
+     * 서브쿼리:  SEARCH sess USING INDEX index_workout_sessions_started_at (started_at>? AND <?)
+     * GROUP BY:  SCAN sess USING INDEX sqlite_autoindex_workout_sessions_1
+     * ```
+     *
+     * 그리고 **여기서는 N+1이 문제가 아니다** — `WHERE`가 한 주로 자르므로 서브쿼리가
+     * 도는 횟수가 **7 남짓으로 고정**이다. [sessionList]는 세션 전체가 대상이라 N이
+     * 무한정 늘어난다. **같은 패턴이라도 N의 상한이 다르면 답이 달라진다.**
+     *
+     * 실측(세션 2,000개): 서브쿼리 **0.10ms** vs `GROUP BY` **0.32ms**.
+     * 인덱스 효과는 이쪽이다 — 인덱스 없이 같은 서브쿼리가 **0.19ms**이고,
+     * 세션이 늘수록 격차가 벌어진다(500개 1.0배 → 2,000개 1.9배).
+     *
+     * 근거는 `DbQueryBenchmark.홈_주간집계_부하곡선`.
      */
     @Query(
         """
