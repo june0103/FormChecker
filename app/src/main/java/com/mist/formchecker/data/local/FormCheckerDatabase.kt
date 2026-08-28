@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RepRecordEntity::class,
         PerformanceMetricsEntity::class,
     ],
-    version = 4,
+    version = 5,
 )
 @TypeConverters(Converters::class)
 abstract class FormCheckerDatabase : RoomDatabase() {
@@ -76,6 +76,32 @@ abstract class FormCheckerDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE rep_records ADD COLUMN knee_tolerance REAL")
                 db.execSQL("ALTER TABLE rep_records ADD COLUMN shallow_tolerance REAL")
                 db.execSQL("ALTER TABLE workout_sessions ADD COLUMN form_thresholds TEXT")
+            }
+        }
+
+        /**
+         * `workout_sessions.started_at`에 인덱스를 만든다. **데이터는 건드리지 않는다.**
+         *
+         * ## 왜 필요한가
+         * 홈 화면이 앱을 켤 때마다 `started_at` 범위로 이번 주를 자르는데
+         * ([WorkoutDao.sessionRepCountsBetween]), 인덱스가 없어 **세션 테이블을 전부
+         * 훑고 있었다.** 기록 목록의 `ORDER BY started_at DESC`도 정렬을 위해 매번
+         * 전체를 읽었다.
+         *
+         * 개발 중에는 세션이 열 개 남짓이라 드러나지 않는다. **기록이 쌓인 사용자에게만
+         * 느려지므로**, 재는 장치(`DbQueryBenchmark`) 없이는 발견되지 않는 종류다.
+         *
+         * ## 이름을 Room 규칙에 맞춘 이유
+         * `index_<테이블>_<컬럼>`은 Room이 엔티티에서 생성하는 이름이다. 다른 이름으로
+         * 만들면 Room이 시작할 때 스키마를 대조하면서 **인덱스가 없다고 판단해 예외를
+         * 던진다** — 인덱스가 실제로는 있어도 그렇다.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_workout_sessions_started_at` " +
+                        "ON `workout_sessions` (`started_at`)",
+                )
             }
         }
     }

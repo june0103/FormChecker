@@ -35,7 +35,26 @@ enum class SyncStatus {
  * `minSdk 24`라 `java.time`을 쓰려면 core library desugaring이 필요하다. 저장 계층 하나
  * 때문에 빌드 설정을 건드리기보다 `Long`으로 두고, 서버로 보낼 때 ISO-8601로 변환한다.
  */
-@Entity(tableName = "workout_sessions")
+@Entity(
+    tableName = "workout_sessions",
+    /**
+     * 홈 화면이 앱을 켤 때마다 `started_at` 범위로 이번 주를 잘라낸다
+     * ([WorkoutDao.sessionRepCountsBetween]). 인덱스가 없으면 그 한 주를 찾으려고
+     * **세션 테이블 전체를 훑는다**(`SCAN sess`) — 기록이 쌓일수록 홈이 느려지고,
+     * 그 비용은 기록이 많은 사용자에게만 나타나 개발 중에는 보이지 않는다.
+     *
+     * 실측(`DbQueryBenchmark`, Galaxy S24 Ultra): 세션 2,000개에서 **0.19ms → 0.10ms**.
+     * **효과가 세션 수에 비례해 커진다** — 500개에서는 차이가 없고(1.0배) 2,000개에서
+     * 1.9배다. 지금 크기에서 급한 문제였다기보다 **커지는 것을 미리 막는 쪽**이다.
+     *
+     * ## 기록 목록은 이 인덱스로 빨라지지 않는다
+     * `ORDER BY started_at DESC`가 있어 도움이 될 것 같지만, 실측에서 세션 2,000개일 때
+     * 오히려 **조금 느렸다**(19.7ms → 21.4ms). 보조 인덱스로 훑으면 행마다 본체를 따로
+     * 찾아가야 해서, 전체를 읽는 쿼리에서는 그 비용이 정렬을 아끼는 이득을 넘는다.
+     * 지금 채택한 `GROUP BY` 판은 이 인덱스를 쓰지 않으므로 그 손해도 없다.
+     */
+    indices = [Index("started_at")],
+)
 data class WorkoutSessionEntity(
     @PrimaryKey val id: String,
     /**
