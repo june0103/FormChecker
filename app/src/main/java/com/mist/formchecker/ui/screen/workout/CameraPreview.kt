@@ -106,6 +106,13 @@ private fun ProcessCameraProvider.bindSafely(
         // 추론이 프레임보다 느릴 때 큐가 밀리지 않도록 최신 프레임만 남긴다.
         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+        // 센서 회전 보정을 CameraX에 맡긴다. 예전에는 [PoseAnalyzer]가 Matrix로 직접
+        // 돌렸는데, 그러면 **프레임마다 Bitmap이 하나 더 생긴다**(회전본). 480×640
+        // ARGB_8888이면 프레임당 1.2MB가 더 할당되고 아무도 recycle하지 않는다.
+        //
+        // 실측(`FramePipelineBenchmark`): 회전 단계 자체가 p95 3.21ms이고, 300프레임에서
+        // GC가 6회 → 3회로 줄었다. RGBA_8888 출력에서만 쓸 수 있다.
+        .setOutputImageRotationEnabled(true)
         .build()
         .apply { setAnalyzer(executor, analyzer) }
 
