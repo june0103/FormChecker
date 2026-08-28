@@ -1,13 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11(API 30) 이하의 자동 백업 규칙. `minSdk 24`라 아직 대상 기기가 있다.
+  API 31 이상은 `data_extraction_rules.xml`이 맡는다 —
+  **두 파일을 함께 고쳐야 한다.** 한쪽만 바꾸면 구형 기기에서 다른 동작을 한다.
+
+  여기에는 클라우드/기기이전 구분이 없다. 하나의 규칙이 둘 다에 적용되므로
+  **더 보수적인 쪽(클라우드 기준)에 맞춘다.**
+
+  `<exclude>`만 쓰면 나머지는 전부 포함이다:
+  · Room DB(`databases/formchecker.db`) → 포함. 운동 기록의 유일한 안전망
+  · DataStore(`files/datastore/`) → 제외. 키·몸무게·나이·성별
+  · 수집 데이터(`external`) → 제외. 개발용이고 용량이 크다
+
+  왜 이렇게 나눴는지는 `data_extraction_rules.xml` 주석과
+  `기술선택_기록.md` 94번 참고.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="file" path="datastore/" />
+    <exclude domain="external" path="." />
 </full-backup-content>
